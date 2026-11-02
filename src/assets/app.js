@@ -449,6 +449,7 @@ function joinDialog(itemId, forUser) {
         $('#j-ok', root).disabled = true; $('#j-info', root).textContent = ''; return;
       }
       $('#j-ok', root).disabled = false;
+      $('#j-ok', root).textContent = pid === S.state.me.id ? 'Bei mir hinzufügen' : `Bei ${userName(pid)} hinzufügen`;
       const max = +(it.free + mine(pid)).toFixed(3);
       $('#j-free', root).textContent = `${num(it.free)} von ${num(it.total)} ${a.einheit} sind noch frei` + (mine(pid) ? `, ${userName(pid)} hat schon ${num(mine(pid))} ${a.einheit}` : '');
       $('#j-box', root).innerHTML = stepper('j-qty', mine(pid) || Math.min(max, a.step), a.step, 0, max, a.einheit);
