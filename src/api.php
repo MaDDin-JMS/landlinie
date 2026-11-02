@@ -92,25 +92,27 @@ function users_public(bool $all = false): array
         db()->query($sql)->fetchAll());
 }
 
+/**
+ * Leergut nachhalten (wird nicht berechnet): je gelieferter Position mit
+ * Pfand ein Eintrag bei der Bestellerin der Position, Anzahl = Gebinde.
+ * Schon als zurückgegeben markierte Einträge bleiben unverändert.
+ */
 function book_pfand(int $roundId, int $actor): void
 {
     $pdo = db();
-    $pdo->prepare("DELETE FROM pfand WHERE round_id = ? AND item_id IS NOT NULL")->execute([$roundId]);
-    $st = $pdo->prepare('INSERT INTO pfand (user_id, round_id, item_id, betrag, text, created_by) VALUES (?, ?, ?, ?, ?, ?)');
+    $pdo->prepare('DELETE FROM pfand WHERE round_id = ? AND item_id IS NOT NULL AND returned_at IS NULL')->execute([$roundId]);
+    $done = $pdo->prepare('SELECT item_id FROM pfand WHERE round_id = ? AND item_id IS NOT NULL');
+    $done->execute([$roundId]);
+    $done = array_flip($done->fetchAll(PDO::FETCH_COLUMN));
+    $st = $pdo->prepare('INSERT INTO pfand (user_id, round_id, item_id, qty, betrag, text, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)');
     $round = round_row($roundId);
     foreach (round_items($roundId) as $it) {
-        if ($it['status'] !== 'aktiv' || !$it['delivered'] || $it['article']['pfand'] <= 0) {
+        if ($it['status'] !== 'aktiv' || !$it['delivered'] || $it['article']['pfand'] <= 0 || isset($done[$it['id']])) {
             continue;
         }
-        foreach ($it['people'] as $p) {
-            $q = $p['actual'] ?? $p['eff'];
-            if ($q <= EPS) {
-                continue;
-            }
-            $betrag = round($it['article']['pfand'] * $it['cases'] * $q / max($it['total'], EPS), 2);
-            $text = sprintf('%s: %s (%s)', $round['title'], $it['article']['pfand_text'] ?: 'Pfand', $it['article']['name']);
-            $st->execute([$p['user_id'], $roundId, $it['id'], $betrag, $text, $actor]);
-        }
+        $a = $it['article'];
+        $text = sprintf('%s (%s, %s)', $a['pfand_text'] ?: 'Pfand', $a['name'], $round['title']);
+        $st->execute([$it['owner_id'], $roundId, $it['id'], $it['cases'], round($a['pfand'] * $it['cases'], 2), $text, $actor]);
     }
 }
 
@@ -413,11 +415,28 @@ try {
 
         case 'pfand':
             me();
-            $rows = $pdo->query('SELECT p.*, u.name FROM pfand p JOIN users u ON u.id = p.user_id ORDER BY p.id DESC LIMIT 500')->fetchAll();
-            $bal = $pdo->query('SELECT u.id AS user_id, u.name, COALESCE(SUM(p.betrag), 0) AS saldo
+            $rows = $pdo->query('SELECT p.*, u.name FROM pfand p JOIN users u ON u.id = p.user_id
+                                 ORDER BY (p.returned_at IS NOT NULL), p.id DESC LIMIT 500')->fetchAll();
+            $bal = $pdo->query('SELECT u.id AS user_id, u.name,
+                                       COALESCE(SUM(CASE WHEN p.returned_at IS NULL THEN p.betrag END), 0) AS saldo,
+                                       COALESCE(SUM(CASE WHEN p.returned_at IS NULL THEN p.qty END), 0) AS stueck
                                 FROM users u LEFT JOIN pfand p ON p.user_id = u.id
                                 WHERE u.active = 1 GROUP BY u.id ORDER BY u.name COLLATE NOCASE')->fetchAll();
             out(['entries' => $rows, 'balances' => $bal]);
+
+        case 'pfand_return':
+            $me = me();
+            $st = $pdo->prepare('SELECT p.*, u.name FROM pfand p JOIN users u ON u.id = p.user_id WHERE p.id = ?');
+            $st->execute([(int)arg('id', 0)]);
+            $e = $st->fetch();
+            if (!$e) {
+                throw new ApiError('Eintrag nicht gefunden', 404);
+            }
+            $ret = (int)arg('returned', 1) === 1;
+            $pdo->prepare("UPDATE pfand SET returned_at = " . ($ret ? "datetime('now')" : 'NULL') . ' WHERE id = ?')->execute([$e['id']]);
+            log_event((int)$me['id'], $e['round_id'] ? (int)$e['round_id'] : null,
+                sprintf('%s: Leergut %s %s (%s)', $me['name'], $e['text'], $ret ? 'zurückgegeben' : 'wieder offen', $e['name']));
+            out(['ok' => true]);
 
         case 'pfand_add':
             $me = me();
@@ -427,8 +446,8 @@ try {
             if (abs($betrag) < 0.005 || $text === '') {
                 throw new ApiError('Betrag und Text angeben.');
             }
-            $pdo->prepare('INSERT INTO pfand (user_id, betrag, text, created_by) VALUES (?, ?, ?, ?)')
-                ->execute([$uid, $betrag, $text, $me['id']]);
+            $pdo->prepare('INSERT INTO pfand (user_id, qty, betrag, text, created_by) VALUES (?, ?, ?, ?, ?)')
+                ->execute([$uid, max(1, (float)arg('qty', 1)), $betrag, $text, $me['id']]);
             log_event((int)$me['id'], null, sprintf('%s: Pfand %s € bei %s (%s)', $me['name'], number_format($betrag, 2, ',', ''), user_name($uid), $text));
             out(['ok' => true]);
 

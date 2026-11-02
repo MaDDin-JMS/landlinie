@@ -487,7 +487,8 @@ function settlement(int $roundId): array
         $row['ware'] = round($row['ware'], 2);
         $row['pfand'] = round($row['pfand'], 2);
         $row['extra'] = $extra;
-        $row['summe'] = round($row['ware'] + $row['pfand'] + $extra, 2);
+        // Pfand wird nicht berechnet (Martin 02.11.2026), nur als Leergut nachgehalten
+        $row['summe'] = round($row['ware'] + $extra, 2);
         $row['paid'] = (int)($paid[$uid] ?? 0);
     }
     unset($row);

@@ -156,6 +156,11 @@ function migrate(PDO $pdo): void
                 PRIMARY KEY (user_id, artnr)
             );
         SQL,
+        // Pfand wird nicht berechnet, nur nachgehalten: je Eintrag "zurückgegeben"
+        4 => <<<SQL
+            ALTER TABLE pfand ADD COLUMN qty REAL NOT NULL DEFAULT 1;
+            ALTER TABLE pfand ADD COLUMN returned_at TEXT;
+        SQL,
     ];
     foreach ($steps as $v => $sql) {
         if ($v > $version) {

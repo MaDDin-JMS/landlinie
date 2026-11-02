@@ -170,7 +170,7 @@ function render() {
       ${navLink('shop', '🛒', 'Shop')}
       ${navLink('korb', '🧺', 'Körbe', count)}
       ${navLink('alle', '📋', 'Alle')}
-      ${navLink('pfand', '♻️', 'Pfand')}
+      ${navLink('pfand', '♻️', 'Leergut')}
       ${st.me.is_admin ? navLink('admin', '⚙️', 'Admin') : ''}
     </nav>
     <main id="main"></main>`;
@@ -493,7 +493,7 @@ function viewKorb(m) {
     ${!st.round ? '<div class="empty">Keine Bestellrunde.</div>' : ''}
     ${st.round && !items.length ? `<div class="empty">${uid === st.me.id ? 'Dein' : esc(userName(uid)) + 's'} Korb ist leer.<br><a href="#/shop">Zum Shop</a></div>` : ''}
     ${items.map((it) => korbCard(it, uid)).join('')}
-    ${items.length ? `<div class="card row"><div class="grow">Summe ${esc(userName(uid))} (brutto, ohne Pfand)</div><div class="price">${eur(sum)}</div></div>` : ''}`;
+    ${items.length ? `<div class="card row"><div class="grow">Summe ${esc(userName(uid))} (brutto, Pfand wird nicht berechnet)</div><div class="price">${eur(sum)}</div></div>` : ''}`;
   m.querySelectorAll('[data-ku]').forEach((b) => (b.onclick = () => { S.korbUser = +b.dataset.ku; viewKorb(m); }));
   wireItemButtons(m, uid);
 }
@@ -646,28 +646,40 @@ async function viewPfand(m) {
   let r;
   try { r = await api('pfand'); } catch (e) { m.innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
   const st = S.state;
+  const open = r.entries.filter((e) => !e.returned_at);
+  const done = r.entries.filter((e) => e.returned_at);
+  const totalOpen = open.reduce((s, e) => s + +e.betrag, 0);
+  const row = (e) => `<div class="row" style="padding:8px 0;border-bottom:1px solid var(--line)">
+    <div class="grow"><b>${num(e.qty)}× ${esc(e.text)}</b><div class="small muted">bei ${esc(e.name)} · ${new Date(e.created_at + 'Z').toLocaleDateString('de-DE')} · Wert ${eur(e.betrag)}${e.returned_at ? ' · zurück am ' + new Date(e.returned_at + 'Z').toLocaleDateString('de-DE') : ''}</div></div>
+    ${e.returned_at ? `<button class="btn sm secondary" data-pret="${e.id}" data-v="0">Doch nicht zurück</button>` : `<button class="btn sm" data-pret="${e.id}" data-v="1">Zurückgegeben</button>`}
+    ${st.me.is_admin && !e.item_id ? `<button class="btn ghost sm" data-pdel="${e.id}" aria-label="Löschen">✕</button>` : ''}</div>`;
   m.innerHTML = `
-    <div class="section-title"><h2>Pfand-Konto</h2><button class="btn sm" id="pf-ret">Rückgabe eintragen</button></div>
-    <p class="small muted">Plus = offenes Pfand (bezahlt, Leergut noch nicht zurück). Pfand-Artikel werden bei der Lieferung automatisch gebucht.</p>
-    <div class="card"><table><tbody>${r.balances.map((b) => `<tr><td>${esc(b.name)}</td><td class="n price">${eur(b.saldo)}</td></tr>`).join('')}</tbody></table></div>
-    <h3 style="margin-top:16px">Buchungen</h3>
-    <div class="card table-wrap"><table><thead><tr><th>Datum</th><th>Wer</th><th>Was</th><th class="n">Betrag</th>${st.me.is_admin ? '<th></th>' : ''}</tr></thead><tbody>
-      ${r.entries.length ? r.entries.map((e) => `<tr><td class="small">${new Date(e.created_at + 'Z').toLocaleDateString('de-DE')}</td><td>${esc(e.name)}</td><td class="small">${esc(e.text)}</td>
-        <td class="n">${eur(e.betrag)}</td>${st.me.is_admin ? `<td>${e.item_id ? '' : `<button class="btn ghost sm" data-pdel="${e.id}">✕</button>`}</td>` : ''}</tr>`).join('') : '<tr><td colspan="5" class="muted">Noch keine Buchungen.</td></tr>'}
-    </tbody></table></div>`;
-  $('#pf-ret', m).onclick = () => modal(`<div class="head"><h2>Pfand buchen</h2><button class="x" data-close>×</button></div>
-    <label class="f">Wer?</label>${userSelect('p-user', st.me.id)}
-    <label class="f">Was?</label><input id="p-text" type="text" placeholder="z. B. 2 Mopro-Kisten zurück">
-    <label class="f">Betrag in € (Rückgabe negativ, z. B. -5,14)</label><input id="p-betrag" type="text" inputmode="decimal" value="-">
+    <div class="section-title"><h2>Leergut</h2><button class="btn sm secondary" id="pf-add">Von Hand eintragen</button></div>
+    <p class="small muted">Pfand wird niemandem berechnet. Hier steht nur, welches Leergut noch draußen ist, damit alles an Landlinie zurückgeht.
+      Pfand-Artikel werden bei "geliefert" automatisch bei der Bestellerin eingetragen.</p>
+    <div class="card row"><div class="grow">Noch nicht zurückgegeben</div><div class="price">${eur(totalOpen)}</div></div>
+    <div class="card"><table><tbody>${r.balances.filter((b) => +b.stueck > 0).map((b) => `<tr><td>${esc(b.name)}</td><td class="n">${num(b.stueck)} Stück</td><td class="n price">${eur(b.saldo)}</td></tr>`).join('') || '<tr><td class="muted">Alles zurück.</td></tr>'}</tbody></table></div>
+    <h3 style="margin-top:16px">Offen (${open.length})</h3>
+    <div class="card">${open.map(row).join('') || '<p class="muted small">Nichts offen.</p>'}</div>
+    ${done.length ? `<h3 style="margin-top:16px">Zurückgegeben</h3><div class="card">${done.slice(0, 50).map(row).join('')}</div>` : ''}`;
+  $('#pf-add', m).onclick = () => modal(`<div class="head"><h2>Leergut eintragen</h2><button class="x" data-close>×</button></div>
+    <label class="f">Bei wem?</label>${userSelect('p-user', st.me.id)}
+    <label class="f">Was?</label><input id="p-text" type="text" placeholder="z. B. Mopro-Kiste">
+    <div class="row"><div class="grow"><label class="f">Anzahl</label><input id="p-qty" type="text" inputmode="numeric" value="1"></div>
+      <div class="grow"><label class="f">Wert gesamt in €</label><input id="p-betrag" type="text" inputmode="decimal"></div></div>
     <div class="err" id="p-err"></div>
-    <div class="actions"><button class="btn secondary" data-close>Abbrechen</button><button class="btn" id="p-ok">Buchen</button></div>`, (root, close) => {
+    <div class="actions"><button class="btn secondary" data-close>Abbrechen</button><button class="btn" id="p-ok">Eintragen</button></div>`, (root, close) => {
     $('#p-ok', root).onclick = async () => {
       try {
-        await api('pfand_add', { user_id: +$('#p-user', root).value, text: $('#p-text', root).value, betrag: parseFloat($('#p-betrag', root).value.replace(',', '.')) });
-        close(); toast('Gebucht'); viewPfand(m);
+        await api('pfand_add', { user_id: +$('#p-user', root).value, text: $('#p-text', root).value, qty: parseFloat($('#p-qty', root).value) || 1, betrag: parseFloat($('#p-betrag', root).value.replace(',', '.')) });
+        close(); toast('Eingetragen'); viewPfand(m);
       } catch (e) { $('#p-err', root).textContent = e.message; }
     };
   });
+  m.querySelectorAll('[data-pret]').forEach((b) => (b.onclick = async () => {
+    await run(() => api('pfand_return', { id: +b.dataset.pret, returned: +b.dataset.v }), +b.dataset.v ? 'Als zurückgegeben markiert' : 'Wieder offen');
+    viewPfand(m);
+  }));
   m.querySelectorAll('[data-pdel]').forEach((b) => (b.onclick = async () => {
     if (!confirm('Buchung löschen?')) return;
     await run(() => api('pfand_delete', { id: +b.dataset.pdel }), 'Gelöscht'); viewPfand(m);
@@ -706,7 +718,7 @@ function admRunde(box) {
         ${r.status === 'geschlossen' ? '<button class="btn secondary" id="r-reopen">Wieder öffnen</button>' : ''}</div>
       ${r.status !== 'offen' ? `<label class="f">Status weiter setzen</label><div class="row">${statusFlow.slice(1).map((s) =>
         `<button class="btn sm ${r.status === s ? '' : 'secondary'}" data-status="${s}">${s}</button>`).join('')}</div>
-        <p class="small muted">"geliefert" bucht das Pfand der Pfand-Artikel auf die Pfand-Konten.</p>` : ''}
+        <p class="small muted">"geliefert" trägt das Leergut der Pfand-Artikel bei der jeweiligen Bestellerin ein (wird nicht berechnet).</p>` : ''}
     </div>` : ''}
     <div class="card"><h2>Neue Bestellrunde</h2>
       <label class="f">Titel</label><input id="n-title" type="text" value="Bestellung ${nextMonday17().toLocaleDateString('de-DE')}">
@@ -801,14 +813,13 @@ async function admAbrechnung(box) {
   const res = await run(() => api('settlement', undefined, `&round_id=${r.id}`));
   const total = res.rows.reduce((s, x) => s + x.summe, 0);
   box.innerHTML = `<div class="row no-print" style="margin-bottom:10px"><button class="btn" onclick="window.print()">Drucken</button></div>
-    <div class="card table-wrap"><h2>Abrechnung ${esc(r.title)}</h2><table><thead><tr><th>Wer</th><th class="n">Ware</th><th class="n">Pfand</th><th class="n">Summe</th><th>bezahlt</th></tr></thead>
-      <tbody>${res.rows.map((x) => `<tr><td><a href="#" data-detail="${x.user_id}">${esc(x.name)}</a></td><td class="n">${eur(x.ware)}</td><td class="n">${eur(x.pfand)}</td>
+    <div class="card table-wrap"><h2>Abrechnung ${esc(r.title)}</h2><table><thead><tr><th>Wer</th><th class="n">Ware</th><th class="n">Summe</th><th>bezahlt</th></tr></thead>
+      <tbody>${res.rows.map((x) => `<tr><td><a href="#" data-detail="${x.user_id}">${esc(x.name)}</a></td><td class="n">${eur(x.ware)}</td>
         <td class="n sum">${eur(x.summe)}</td><td><input type="checkbox" data-paid="${x.user_id}" ${x.paid ? 'checked' : ''}></td></tr>`).join('')}
-      <tr><td class="sum">Gesamt</td><td></td><td></td><td class="n sum">${eur(total)}</td><td></td></tr></tbody></table>
+      <tr><td class="sum">Gesamt</td><td></td><td class="n sum">${eur(total)}</td><td></td></tr></tbody></table>
       <p class="small muted">Preise brutto inkl. MwSt. Gewogene Mengen sind berücksichtigt, nicht gelieferte Artikel nicht.</p></div>
     ${res.rows.map((x) => `<div class="card" id="det-${x.user_id}"><h3>${esc(x.name)} – ${eur(x.summe)}</h3><table><tbody>
       ${x.zeilen.map((z) => `<tr><td>${esc(z.name)}</td><td class="n">${num(z.qty)} ${esc(z.einheit)}${z.gewogen ? ' ⚖' : ''}</td><td class="n">${eur(z.unit_price)}</td><td class="n">${eur(z.betrag)}</td></tr>`).join('')}
-      ${x.pfand ? `<tr><td>Pfand</td><td></td><td></td><td class="n">${eur(x.pfand)}</td></tr>` : ''}
       ${x.extra ? `<tr><td>${esc(r.extra_text)}</td><td></td><td></td><td class="n">${eur(x.extra)}</td></tr>` : ''}</tbody></table></div>`).join('')}`;
   box.querySelectorAll('[data-paid]').forEach((c) => (c.onchange = () => run(() => api('payment', { round_id: r.id, user_id: +c.dataset.paid, paid: c.checked ? 1 : 0 }), 'Gespeichert')));
   box.querySelectorAll('[data-detail]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); $('#det-' + a.dataset.detail).scrollIntoView({ behavior: 'smooth' }); }));
