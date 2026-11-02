@@ -507,10 +507,13 @@ function order_lines(int $roundId): array
         }
         $a = $it['article'];
         $menge = $mode === 'einheiten' ? $it['total'] : $it['cases'];
-        $lines[$a['artnr']] ??= ['artnr' => $a['artnr'], 'name' => $a['name'], 'gebinde' => $a['gebinde'], 'cases' => 0, 'menge' => 0, 'betrag' => 0.0];
+        $lines[$a['artnr']] ??= ['artnr' => $a['artnr'], 'name' => $a['name'], 'gebinde' => $a['gebinde'], 'cases' => 0, 'menge' => 0,
+            'betrag' => 0.0, 'netto' => 0.0, 'unit_price_net' => $a['unit_price_net'], 'einheit' => $a['einheit']];
         $lines[$a['artnr']]['cases'] += $it['cases'];
         $lines[$a['artnr']]['menge'] += $menge;
         $lines[$a['artnr']]['betrag'] += $a['case_price'] * $it['cases'];
+        // Netto wie im Landlinie-Warenkorb: Preis je Einheit × Einheiten
+        $lines[$a['artnr']]['netto'] = round($lines[$a['artnr']]['netto'] + $a['unit_price_net'] * $it['total'], 2);
     }
     ksort($lines, SORT_NATURAL);
     return array_values($lines);

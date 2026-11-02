@@ -761,14 +761,18 @@ async function admBestellung(box) {
   if (!r) { box.innerHTML = '<div class="empty">Keine Runde.</div>'; return; }
   const res = await run(() => api('order_lines', undefined, `&round_id=${r.id}`));
   const sum = res.lines.reduce((s, l) => s + l.betrag, 0);
+  const sumNet = res.lines.reduce((s, l) => s + l.netto, 0);
   const openN = S.state.items.filter((i) => i.status === 'aktiv' && i.mode === 'muss' && i.free > 0.0001).length;
   box.innerHTML = `
     ${r.status === 'offen' ? `<div class="hint o">Die Runde ist noch offen${openN ? `, ${openN} "muss teilen" sind nicht voll und würden entfallen` : ''}. Erst Bestellschluss machen, dann exportieren.</div>` : ''}
-    <div class="card"><div class="row"><div class="grow"><b>${res.lines.length} Artikel</b> · ${eur(sum)} brutto</div>
+    <div class="card"><div class="row"><div class="grow"><b>${res.lines.length} Artikel</b> · <b>${eur(sumNet)} netto</b> · ${eur(sum)} brutto</div>
       <a class="btn" href="api.php?a=export&round_id=${r.id}">CSV herunterladen</a></div>
-      <p class="small muted">Im Shop unter Produkte → Datenerfassung → "Bestellen per CSV" hochladen. Menge = ${res.mode === 'einheiten' ? 'Ladeneinheiten' : 'Anzahl Gebinde'}.</p></div>
-    <div class="card table-wrap"><table><thead><tr><th>Art.-Nr.</th><th>Artikel</th><th>Gebinde</th><th class="n">Menge</th><th class="n">Betrag</th></tr></thead>
-      <tbody>${res.lines.map((l) => `<tr><td>${esc(l.artnr)}</td><td>${esc(l.name)}</td><td class="small">${esc(l.gebinde)}</td><td class="n">${num(l.menge)}</td><td class="n">${eur(l.betrag)}</td></tr>`).join('')}</tbody></table></div>`;
+      <p class="small muted">Im Shop unter Produkte → Datenerfassung → "Bestellen per CSV" hochladen. Menge = ${res.mode === 'einheiten' ? 'Ladeneinheiten' : 'Anzahl Gebinde'}.
+        Netto wie im Landlinie-Warenkorb (ohne Pfand), zum Abgleichen.</p></div>
+    <div class="card table-wrap"><table><thead><tr><th>Art.-Nr.</th><th>Artikel</th><th class="n">Menge</th><th class="n">Netto</th><th class="n">Brutto</th></tr></thead>
+      <tbody>${res.lines.map((l) => `<tr><td>${esc(l.artnr)}</td><td>${esc(l.name)}<div class="small muted">${esc(l.gebinde)} · ${eur(l.unit_price_net)}/${esc(l.einheit)} netto</div></td>
+        <td class="n">${num(l.menge)}</td><td class="n">${eur(l.netto)}</td><td class="n muted">${eur(l.betrag)}</td></tr>`).join('')}
+      <tr><td></td><td class="sum">Summe</td><td></td><td class="n sum">${eur(sumNet)}</td><td class="n muted">${eur(sum)}</td></tr></tbody></table></div>`;
 }
 
 function admVerteilen(box) {
