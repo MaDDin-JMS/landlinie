@@ -1,0 +1,9 @@
+{
+  "name": "Bestellgemeinschaft",
+  "short_name": "Bestellung",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f5f6f2",
+  "theme_color": "#2f6b3a",
+  "icons": [{ "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
