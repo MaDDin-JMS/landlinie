@@ -258,6 +258,7 @@ function viewShop(m) {
     ${!st.round ? `<div class="hint o">Noch keine Bestellrunde. ${st.me.is_admin ? 'Lege unter Admin eine an.' : 'Die Admin legt sie an.'}</div>` : ''}
     ${st.round && !isOpen() ? `<div class="hint o">Die Bestellrunde ist geschlossen (${esc(st.round.status)}). Bestellen geht erst wieder in der nächsten Runde.</div>` : ''}
     ${open.length ? `<div class="open-shares"><h3>Offene Teil-Gebinde (${open.length})</h3>${open.map(shareRow).join('')}</div>` : ''}
+    <div id="search-anchor"></div>
     <div class="search">
       <input type="search" id="q" placeholder="Artikel suchen (Name, Hersteller, Art.-Nr.)" value="${esc(S.q)}" autocomplete="off">
       <div class="chips"><button class="chip ${S.cat === '' ? 'on' : ''}" data-cat="">Alle</button>
@@ -266,12 +267,12 @@ function viewShop(m) {
         ${cats.map((c) => `<button class="chip ${S.cat === c.code ? 'on' : ''}" data-cat="${esc(c.code)}">${esc(c.label)}</button>`).join('')}</div>
     </div>
     ${st.artikel_anzahl === 0 ? `<div class="empty">Noch keine Artikel. ${st.me.is_admin ? 'Unter Admin → Sortiment den Abgleich starten.' : ''}</div>` : ''}
-    <div class="grid" id="arts"></div>
+    <div class="grid" id="arts" style="min-height:100vh;align-content:start"></div>
     <div id="more" style="text-align:center;margin-top:12px"></div>`;
   m.querySelectorAll('[data-join]').forEach((b) => (b.onclick = () => joinDialog(+b.dataset.join)));
-  m.querySelectorAll('[data-cat]').forEach((b) => (b.onclick = () => { S.cat = b.dataset.cat; S.offset = 0; viewShop(m); }));
+  m.querySelectorAll('[data-cat]').forEach((b) => (b.onclick = () => { S.cat = b.dataset.cat; S.offset = 0; S.jump = true; viewShop(m); }));
   const q = $('#q', m);
-  q.oninput = () => { clearTimeout(q.t); q.t = setTimeout(() => { S.q = q.value; S.offset = 0; searchArticles(); }, 250); };
+  q.oninput = () => { clearTimeout(q.t); q.t = setTimeout(() => { S.q = q.value; S.offset = 0; S.jump = true; searchArticles(); }, 250); };
   searchArticles();
 }
 
@@ -283,6 +284,17 @@ function shareRow(it) {
       <div class="small"><b>${num(it.free)} von ${num(it.total)} ${esc(a.einheit)} frei</b> · ${modeLabel[it.mode]} · von ${esc(userName(it.owner_id))}</div>
       <div class="bar part"><i style="width:${Math.round((taken / it.total) * 100)}%"></i></div></div>
     <button class="btn sm orange" data-join="${it.id}">Bei mir hinzufügen</button></div>`;
+}
+
+// Nach Filter/Suche: Suchfeld nach oben, die offenen Teil-Gebinde rutschen aus dem Bild
+function jumpToSearch() {
+  const a = $('#search-anchor');
+  if (!a) return;
+  const nav = $('.nav');
+  const offset = $('.top').offsetHeight + (nav && getComputedStyle(nav).position === 'sticky' ? nav.offsetHeight : 0);
+  window.scrollTo({ top: Math.max(0, a.getBoundingClientRect().top + window.scrollY - offset), behavior: 'smooth' });
+  const on = $('.chips .chip.on');
+  if (on) on.scrollIntoView({ inline: 'center', block: 'nearest' });
 }
 
 async function searchArticles(append = false) {
@@ -299,6 +311,7 @@ async function searchArticles(append = false) {
       : S.cat === '_zuletzt' && !S.q ? 'Noch nichts bestellt.' : 'Nichts gefunden.'}</div>`);
   $('#more').innerHTML = S.more ? '<button class="btn secondary" id="more-btn">Weitere Artikel</button>' : '';
   if (S.more) $('#more-btn').onclick = () => { S.offset += 40; searchArticles(true); };
+  if (S.jump) { S.jump = false; jumpToSearch(); }
   $('#arts').querySelectorAll('[data-add]').forEach((b) => (b.onclick = () => addDialog(S.articles.find((a) => a.artnr === b.dataset.add))));
   $('#arts').querySelectorAll('[data-join]').forEach((b) => (b.onclick = () => joinDialog(+b.dataset.join)));
   $('#arts').querySelectorAll('[data-fav]').forEach((b) => (b.onclick = async () => {
