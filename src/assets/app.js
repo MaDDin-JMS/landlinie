@@ -417,6 +417,10 @@ function addDialog(a) {
     };
     root.querySelectorAll('#a-mode button').forEach((b) => (b.onclick = () => { st0.mode = b.dataset.m; upd(); }));
     wireSteppers($('#a-cases', root).closest('.stepper').parentElement, upd);
+    $('#a-owner', root).onchange = () => {
+      const pid = +$('#a-owner', root).value;
+      $('#a-ok', root).textContent = pid === st.me.id ? 'In den Korb' : `In den Korb von ${userName(pid)}`;
+    };
     upd();
     $('#a-ok', root).onclick = async () => {
       const cases = Math.max(1, Math.round(val($('#a-cases', root))));
