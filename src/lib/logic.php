@@ -431,6 +431,7 @@ function article_public(array $a): array
         'units' => units_per_case($a),
         'step' => share_step($a),
         'unit_price' => unit_price_gross($a),
+        'unit_price_net' => unit_price_net($a),
         'case_price' => case_price_gross($a),
         'mwst' => (int)$a['mwst'],
         'hersteller' => $a['hersteller'],

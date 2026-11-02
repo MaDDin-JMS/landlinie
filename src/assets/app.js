@@ -312,6 +312,10 @@ function articleTags(a) {
   return `<div class="tags">${t.join('')}</div>`;
 }
 
+function netLine(a) {
+  return `<div class="muted small">Netto: ${eur(a.unit_price_net)} / ${esc(a.einheit)} + ${a.mwst} % MwSt.</div>`;
+}
+
 function articleCard(a) {
   const shared = isOpen() ? S.state.items.filter((it) => it.artnr === a.artnr && it.status === 'aktiv') : [];
   const joinable = shared.filter((it) => it.mode !== 'allein' && it.free > 0.0001);
@@ -322,6 +326,7 @@ function articleCard(a) {
         <div class="meta">${esc(a.zusatz ? a.zusatz + ' · ' : '')}${esc(a.gebinde)} · Art. ${esc(a.artnr)}</div>
         <div class="price" style="margin-top:4px">${eur(a.unit_price)} <small>/ ${esc(a.einheit)}</small>
           <small> · Gebinde ${num(a.units)} ${esc(a.einheit)} = ${eur(a.case_price)}</small></div>
+        ${netLine(a)}
         ${articleTags(a)}
       </div></div>
     ${shared.length ? `<div class="hint ${joinable.length ? 'o' : ''}">${shared.map((it) =>
@@ -347,7 +352,7 @@ function addDialog(a) {
   modal(`<div class="head"><h2>${esc(a.name)}</h2><button class="x" data-close>×</button></div>
     <div class="art"><div class="img" style="background-image:url('${esc(img(a))}')"></div>
       <div class="grow small"><div>${esc(a.zusatz)}</div><div>Gebinde: <b>${esc(a.gebinde)}</b> (${num(a.units)} ${esc(a.einheit)})</div>
-      <div class="price">${eur(a.unit_price)} / ${esc(a.einheit)} · Gebinde ${eur(a.case_price)}</div><div class="muted">inkl. ${a.mwst} % MwSt</div></div></div>
+      <div class="price">${eur(a.unit_price)} / ${esc(a.einheit)} · Gebinde ${eur(a.case_price)}</div>${netLine(a)}</div></div>
     <label class="f">Für wen?</label>${userSelect('a-owner', st.me.id)}
     <label class="f">Wie bestellen?</label>
     <div class="seg" id="a-mode">
@@ -491,6 +496,7 @@ function korbCard(it, uid) {
     <div class="art"><div class="img" data-img2="${esc(a.artnr)}" style="background-image:url('${esc(img(a))}')"></div>
       <div class="grow"><div class="name">${esc(a.name)}</div>
         <div class="meta">${esc(a.gebinde)} · ${it.cases} Gebinde · ${eur(a.unit_price)}/${esc(a.einheit)}</div>
+        ${netLine(a)}
         <div class="row" style="margin-top:4px">${itemStatus(it)}${isOwner ? '' : `<span class="tag b">mitbestellt bei ${esc(userName(it.owner_id))}</span>`}</div>
         <div class="price" style="margin-top:4px">${esc(userName(uid))}: ${num(q)} ${esc(a.einheit)} = ${eur(q * a.unit_price)}</div>
       </div></div>
