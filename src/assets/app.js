@@ -270,7 +270,7 @@ function viewShop(m) {
     <div class="grid" id="arts" style="min-height:100vh;align-content:start"></div>
     <div id="more" style="text-align:center;margin-top:12px"></div>`;
   m.querySelectorAll('[data-join]').forEach((b) => (b.onclick = () => joinDialog(+b.dataset.join)));
-  m.querySelectorAll('[data-cat]').forEach((b) => (b.onclick = () => { S.cat = b.dataset.cat; S.offset = 0; S.jump = true; viewShop(m); }));
+  m.querySelectorAll('[data-cat]').forEach((b) => (b.onclick = () => { S.cat = b.dataset.cat; S.q = ''; S.offset = 0; S.jump = true; viewShop(m); }));
   const q = $('#q', m);
   q.oninput = () => { clearTimeout(q.t); q.t = setTimeout(() => { S.q = q.value; S.offset = 0; S.jump = true; searchArticles(); }, 250); };
   searchArticles();
