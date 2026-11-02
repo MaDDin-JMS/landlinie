@@ -261,6 +261,8 @@ function viewShop(m) {
     <div class="search">
       <input type="search" id="q" placeholder="Artikel suchen (Name, Hersteller, Art.-Nr.)" value="${esc(S.q)}" autocomplete="off">
       <div class="chips"><button class="chip ${S.cat === '' ? 'on' : ''}" data-cat="">Alle</button>
+        <button class="chip ${S.cat === '_fav' ? 'on' : ''}" data-cat="_fav">★ Favoriten</button>
+        <button class="chip ${S.cat === '_zuletzt' ? 'on' : ''}" data-cat="_zuletzt">Zuletzt bestellt</button>
         ${cats.map((c) => `<button class="chip ${S.cat === c.code ? 'on' : ''}" data-cat="${esc(c.code)}">${esc(c.label)}</button>`).join('')}</div>
     </div>
     ${st.artikel_anzahl === 0 ? `<div class="empty">Noch keine Artikel. ${st.me.is_admin ? 'Unter Admin → Sortiment den Abgleich starten.' : ''}</div>` : ''}
@@ -293,11 +295,20 @@ async function searchArticles(append = false) {
   S.more = r.more;
   if (!$('#arts')) return;
   $('#arts').innerHTML = S.articles.length ? S.articles.map(articleCard).join('') :
-    (S.state.artikel_anzahl ? '<div class="empty">Nichts gefunden.</div>' : '');
+    (!S.state.artikel_anzahl ? '' : `<div class="empty">${S.cat === '_fav' && !S.q ? 'Noch keine Favoriten. Tippe bei einem Artikel auf den Stern ☆.'
+      : S.cat === '_zuletzt' && !S.q ? 'Noch nichts bestellt.' : 'Nichts gefunden.'}</div>`);
   $('#more').innerHTML = S.more ? '<button class="btn secondary" id="more-btn">Weitere Artikel</button>' : '';
   if (S.more) $('#more-btn').onclick = () => { S.offset += 40; searchArticles(true); };
   $('#arts').querySelectorAll('[data-add]').forEach((b) => (b.onclick = () => addDialog(S.articles.find((a) => a.artnr === b.dataset.add))));
   $('#arts').querySelectorAll('[data-join]').forEach((b) => (b.onclick = () => joinDialog(+b.dataset.join)));
+  $('#arts').querySelectorAll('[data-fav]').forEach((b) => (b.onclick = async () => {
+    const r = await run(() => api('fav_toggle', { artnr: b.dataset.fav }), null);
+    const f = S.state.favs;
+    if (r.fav) f.push(b.dataset.fav); else f.splice(f.indexOf(b.dataset.fav), 1);
+    b.classList.toggle('on', r.fav);
+    b.textContent = r.fav ? '★' : '☆';
+    toast(r.fav ? 'Zu Favoriten hinzugefügt' : 'Aus Favoriten entfernt');
+  }));
   $('#arts').querySelectorAll('[data-img]').forEach((b) => (b.onclick = () => imageDialog(S.articles.find((a) => a.artnr === b.dataset.img))));
 }
 
@@ -322,7 +333,8 @@ function articleCard(a) {
   return `<div class="card"><div class="art">
       <div class="img" data-img="${esc(a.artnr)}" style="background-image:url('${esc(img(a))}')" role="img" aria-label="Bild ${esc(a.name)}"></div>
       <div class="grow">
-        <div class="name">${esc(a.name)}</div>
+        <div class="row" style="align-items:flex-start;flex-wrap:nowrap"><div class="name grow">${esc(a.name)}</div>
+          <button class="fav ${S.state.favs.includes(a.artnr) ? 'on' : ''}" data-fav="${esc(a.artnr)}" aria-label="Favorit">${S.state.favs.includes(a.artnr) ? '★' : '☆'}</button></div>
         <div class="meta">${esc(a.zusatz ? a.zusatz + ' · ' : '')}${esc(a.gebinde)} · Art. ${esc(a.artnr)}</div>
         <div class="price" style="margin-top:4px">${eur(a.unit_price)} <small>/ ${esc(a.einheit)}</small>
           <small> · Gebinde ${num(a.units)} ${esc(a.einheit)} = ${eur(a.case_price)}</small></div>

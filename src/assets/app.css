@@ -221,3 +221,6 @@ td.n, th.n { text-align: right; white-space: nowrap; }
   .card { box-shadow: none; border: 1px solid #ccc; break-inside: avoid; }
   body { background: #fff; }
 }
+
+.fav { border: 0; background: transparent; font-size: 1.5rem; line-height: 1; color: #b9bfb8; cursor: pointer; padding: 0 0 0 6px; min-width: 36px; min-height: 36px; }
+.fav.on { color: #e0a100; }

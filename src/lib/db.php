@@ -148,6 +148,14 @@ function migrate(PDO $pdo): void
                 PRIMARY KEY (artnr, code)
             );
         SQL,
+        3 => <<<SQL
+            CREATE TABLE favorites (
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                artnr TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (user_id, artnr)
+            );
+        SQL,
     ];
     foreach ($steps as $v => $sql) {
         if ($v > $version) {

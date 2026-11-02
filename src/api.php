@@ -185,6 +185,11 @@ try {
                     ? date('c', (int)setting('sortiment_ts', '0') + 6 * 3600) : null,
                 'artikel_anzahl' => (int)$pdo->query('SELECT COUNT(*) FROM articles WHERE active = 1')->fetchColumn(),
                 'export_menge' => setting('export_menge', 'gebinde'),
+                'favs' => (function () use ($pdo, $me) {
+                    $st = $pdo->prepare('SELECT artnr FROM favorites WHERE user_id = ?');
+                    $st->execute([$me['id']]);
+                    return $st->fetchAll(PDO::FETCH_COLUMN);
+                })(),
                 'now' => date('c'),
             ]);
 
@@ -211,11 +216,39 @@ try {
             if ((int)arg('pfand', 0)) {
                 $where[] = 'pfand > 0';
             }
-            $sql = 'SELECT * FROM articles WHERE ' . implode(' AND ', $where) . " ORDER BY ltrim(name, '\"''`´ ') COLLATE NOCASE LIMIT 41 OFFSET " . $offset;
+            if ($cat === '_fav') {
+                array_splice($where, 1, 1);
+                array_splice($params, 0, 2);
+                $where[] = 'artnr IN (SELECT artnr FROM favorites WHERE user_id = ?)';
+                $params[] = (int)$_SESSION['uid'];
+            }
+            if ($cat === '_zuletzt') {
+                // Zuletzt bestellt: Artikel aus früheren und der laufenden Runde, neueste zuerst
+                array_splice($where, 1, 1);
+                array_splice($params, 0, 2);
+                $st = $pdo->prepare('SELECT * FROM articles
+                    WHERE ' . implode(' AND ', $where) . ' AND artnr IN (SELECT artnr FROM items)
+                    ORDER BY (SELECT MAX(i.id) FROM items i WHERE i.artnr = articles.artnr) DESC LIMIT 41 OFFSET ' . $offset);
+                $st->execute($params);
+                $rows = $st->fetchAll();
+                out(['items' => array_map('article_public', array_slice($rows, 0, 40)), 'more' => count($rows) > 40]);
+            }
+            $sql ='SELECT * FROM articles WHERE ' . implode(' AND ', $where) . " ORDER BY ltrim(name, '\"''`´ ') COLLATE NOCASE LIMIT 41 OFFSET " . $offset;
             $st = $pdo->prepare($sql);
             $st->execute($params);
             $rows = $st->fetchAll();
             out(['items' => array_map('article_public', array_slice($rows, 0, 40)), 'more' => count($rows) > 40]);
+
+        case 'fav_toggle':
+            $me = me();
+            $artnr = article((string)arg('artnr', ''))['artnr'];
+            $del = $pdo->prepare('DELETE FROM favorites WHERE user_id = ? AND artnr = ?');
+            $del->execute([$me['id'], $artnr]);
+            if ($del->rowCount() === 0) {
+                $pdo->prepare('INSERT INTO favorites (user_id, artnr) VALUES (?, ?)')->execute([$me['id'], $artnr]);
+                out(['fav' => true]);
+            }
+            out(['fav' => false]);
 
         case 'item_add':
             $me = me();
