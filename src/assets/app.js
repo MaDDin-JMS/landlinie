@@ -665,8 +665,6 @@ function admRunde(box) {
       <p class="small">Status: <b>${esc(r.status)}</b> · Bestellschluss ${dt(r.deadline)}</p>
       <label class="f">Titel</label><input id="r-title" type="text" value="${esc(r.title)}">
       <label class="f">Bestellschluss</label><input id="r-dl" type="datetime-local" value="${esc(r.deadline.slice(0, 16))}">
-      <div class="row"><div class="grow"><label class="f">Zusatzkosten (werden durch alle Besteller geteilt)</label><input id="r-extra" type="text" inputmode="decimal" value="${String(r.extra_kosten).replace('.', ',')}"></div>
-      <div class="grow"><label class="f">Bezeichnung</label><input id="r-extra-t" type="text" value="${esc(r.extra_text)}"></div></div>
       <div class="row" style="margin-top:12px"><button class="btn" id="r-save">Speichern</button>
         ${r.status === 'offen' ? '<button class="btn orange" id="r-close">Bestellschluss jetzt</button>' : ''}
         ${r.status === 'geschlossen' ? '<button class="btn secondary" id="r-reopen">Wieder öffnen</button>' : ''}</div>
@@ -677,7 +675,6 @@ function admRunde(box) {
     <div class="card"><h2>Neue Bestellrunde</h2>
       <label class="f">Titel</label><input id="n-title" type="text" value="Bestellung ${nextMonday17().toLocaleDateString('de-DE')}">
       <label class="f">Bestellschluss</label><input id="n-dl" type="datetime-local" value="${localInput(nextMonday17())}">
-      <label class="f">Zusatzkosten in € (z. B. Kontoführung)</label><input id="n-extra" type="text" inputmode="decimal" value="0">
       <button class="btn" style="margin-top:12px" id="n-go">Runde anlegen</button>
       ${r && r.status !== 'abgerechnet' ? '<p class="small muted">Die neue Runde wird zur aktuellen. Die alte bleibt unter "Frühere Runden" erreichbar.</p>' : ''}
     </div>
@@ -691,7 +688,7 @@ function admRunde(box) {
       <p class="small muted">Beim ersten Import im Shop prüfen, ob die Mengen im Warenkorb stimmen.</p></div>`;
   const num2 = (s) => parseFloat(String(s).replace(',', '.')) || 0;
   if (r) {
-    $('#r-save', box).onclick = async () => { await run(() => api('round_update', { id: r.id, title: $('#r-title', box).value, deadline: $('#r-dl', box).value, extra_kosten: num2($('#r-extra', box).value), extra_text: $('#r-extra-t', box).value }), 'Gespeichert'); await load(); render(); };
+    $('#r-save', box).onclick = async () => { await run(() => api('round_update', { id: r.id, title: $('#r-title', box).value, deadline: $('#r-dl', box).value }), 'Gespeichert'); await load(); render(); };
     const c = $('#r-close', box);
     if (c) c.onclick = async () => {
       if (!confirm('Bestellschluss jetzt? Nicht volle "muss teilen"-Artikel entfallen.')) return;
@@ -704,7 +701,7 @@ function admRunde(box) {
     box.querySelectorAll('[data-status]').forEach((b) => (b.onclick = async () => { await run(() => api('round_status', { id: r.id, status: b.dataset.status }), 'Status gesetzt'); await load(); render(); }));
   }
   $('#n-go', box).onclick = async () => {
-    const res = await run(() => api('round_create', { title: $('#n-title', box).value, deadline: $('#n-dl', box).value, extra_kosten: num2($('#n-extra', box).value) }), 'Runde angelegt');
+    const res = await run(() => api('round_create', { title: $('#n-title', box).value, deadline: $('#n-dl', box).value }), 'Runde angelegt');
     await load(res.id); render();
   };
   box.querySelectorAll('[data-open-round]').forEach((b) => (b.onclick = async () => { await load(+b.dataset.openRound); render(); }));
@@ -768,10 +765,10 @@ async function admAbrechnung(box) {
   const res = await run(() => api('settlement', undefined, `&round_id=${r.id}`));
   const total = res.rows.reduce((s, x) => s + x.summe, 0);
   box.innerHTML = `<div class="row no-print" style="margin-bottom:10px"><button class="btn" onclick="window.print()">Drucken</button></div>
-    <div class="card table-wrap"><h2>Abrechnung ${esc(r.title)}</h2><table><thead><tr><th>Wer</th><th class="n">Ware</th><th class="n">Pfand</th><th class="n">${esc(r.extra_text || 'Zusatz')}</th><th class="n">Summe</th><th>bezahlt</th></tr></thead>
-      <tbody>${res.rows.map((x) => `<tr><td><a href="#" data-detail="${x.user_id}">${esc(x.name)}</a></td><td class="n">${eur(x.ware)}</td><td class="n">${eur(x.pfand)}</td><td class="n">${eur(x.extra)}</td>
+    <div class="card table-wrap"><h2>Abrechnung ${esc(r.title)}</h2><table><thead><tr><th>Wer</th><th class="n">Ware</th><th class="n">Pfand</th><th class="n">Summe</th><th>bezahlt</th></tr></thead>
+      <tbody>${res.rows.map((x) => `<tr><td><a href="#" data-detail="${x.user_id}">${esc(x.name)}</a></td><td class="n">${eur(x.ware)}</td><td class="n">${eur(x.pfand)}</td>
         <td class="n sum">${eur(x.summe)}</td><td><input type="checkbox" data-paid="${x.user_id}" ${x.paid ? 'checked' : ''}></td></tr>`).join('')}
-      <tr><td class="sum">Gesamt</td><td></td><td></td><td></td><td class="n sum">${eur(total)}</td><td></td></tr></tbody></table>
+      <tr><td class="sum">Gesamt</td><td></td><td></td><td class="n sum">${eur(total)}</td><td></td></tr></tbody></table>
       <p class="small muted">Preise brutto inkl. MwSt. Gewogene Mengen sind berücksichtigt, nicht gelieferte Artikel nicht.</p></div>
     ${res.rows.map((x) => `<div class="card" id="det-${x.user_id}"><h3>${esc(x.name)} – ${eur(x.summe)}</h3><table><tbody>
       ${x.zeilen.map((z) => `<tr><td>${esc(z.name)}</td><td class="n">${num(z.qty)} ${esc(z.einheit)}${z.gewogen ? ' ⚖' : ''}</td><td class="n">${eur(z.unit_price)}</td><td class="n">${eur(z.betrag)}</td></tr>`).join('')}
