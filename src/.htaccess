@@ -1,4 +1,5 @@
 DirectoryIndex index.html
+AddType text/javascript .mjs
 Options -Indexes
 RewriteEngine On
 RewriteCond %{HTTPS} !=on

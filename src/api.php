@@ -390,6 +390,26 @@ try {
             me();
             out(['rows' => settlement((int)arg('round_id', 0))]);
 
+        case 'invoice':
+            me();
+            out(invoice_check((int)arg('round_id', 0)));
+
+        case 'invoice_apply':
+            $me = admin();
+            $zeilen = arg('zeilen', []);
+            if (!is_array($zeilen) || count($zeilen) > 1000) {
+                throw new ApiError('Rechnungszeilen fehlen oder sind zu viele.');
+            }
+            $netto = arg('netto');
+            invoice_apply((int)arg('round_id', 0), trim((string)arg('nr', '')), trim((string)arg('datum', '')),
+                is_numeric($netto) ? (float)$netto : null, $zeilen, (int)$me['id']);
+            out(invoice_check((int)arg('round_id', 0)));
+
+        case 'invoice_delete':
+            $me = admin();
+            invoice_delete((int)arg('round_id', 0), (int)$me['id']);
+            out(['ok' => true]);
+
         case 'payment':
             admin();
             $pdo->prepare('INSERT INTO payments (round_id, user_id, paid) VALUES (?, ?, ?)

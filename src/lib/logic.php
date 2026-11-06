@@ -367,9 +367,11 @@ function reopen_round(int $roundId, int $actor): void
 function round_items(int $roundId): array
 {
     $pdo = db();
-    $st = $pdo->prepare('SELECT i.*, a.name, a.zusatz, a.gebinde, a.vpe, a.faktor, a.einheit, a.ek, a.mwst, a.image,
+    // Nach geprüfter Rechnung gilt der eingefrorene Preis der Runde (round_prices)
+    $st = $pdo->prepare('SELECT i.*, a.name, a.zusatz, a.gebinde, a.vpe, a.faktor, a.einheit, COALESCE(rp.ek, a.ek) AS ek, a.mwst, a.image,
                                 a.hersteller, a.land, a.qualitaet, a.pfand, a.pfand_text, a.bestand, a.staffel, a.merkmale, a.wg, a.top, a.ean
                          FROM items i JOIN articles a ON a.artnr = i.artnr
+                         LEFT JOIN round_prices rp ON rp.round_id = i.round_id AND rp.artnr = i.artnr
                          WHERE i.round_id = ? ORDER BY a.name, i.id');
     $st->execute([$roundId]);
     $items = $st->fetchAll();
@@ -541,4 +543,144 @@ function mode_label(string $mode): string
 function fmt_qty(float $q): string
 {
     return rtrim(rtrim(number_format($q, 3, ',', ''), '0'), ',');
+}
+
+/**
+ * Landlinie-Rechnung einer Runde übernehmen. $zeilen kommen aus dem Browser
+ * (PDF dort mit pdf.js gelesen): artnr, epreis (netto je Einheit), gpreis,
+ * gesamt, me. Mehrfach vorkommende Artikelnummern werden zusammengefasst
+ * (höchster E-Preis, Mengen/Beträge addiert).
+ *
+ * Preisregel (Martin 06.11.2026): Ist der E-Preis auf der Rechnung höher als
+ * bei der Bestellung, gilt der Rechnungspreis; sonst bleibt der bestellte.
+ * Der bestellte Preis wird bei der ersten Prüfung eingefroren, damit eine
+ * spätere Sortiment-Aktualisierung die Runde nicht mehr verändert und eine
+ * erneut hochgeladene Rechnung wieder gegen den Bestellpreis vergleicht.
+ */
+function invoice_apply(int $roundId, string $nr, string $datum, ?float $netto, array $zeilen, int $actor): void
+{
+    $pdo = db();
+    $round = round_row($roundId);
+    $lines = [];
+    foreach ($zeilen as $z) {
+        if (!is_array($z)) {
+            continue;
+        }
+        $artnr = trim((string)($z['artnr'] ?? ''));
+        if (!preg_match('/^\d{1,10}$/', $artnr)) {
+            continue;
+        }
+        $ep = is_numeric($z['epreis'] ?? null) ? round((float)$z['epreis'], 4) : null;
+        $l = $lines[$artnr] ?? ['epreis' => null, 'gpreis' => 0.0, 'gesamt' => 0.0, 'me' => ''];
+        if ($ep !== null && ($l['epreis'] === null || $ep > $l['epreis'])) {
+            $l['epreis'] = $ep;
+        }
+        $l['gpreis'] += is_numeric($z['gpreis'] ?? null) ? (float)$z['gpreis'] : 0.0;
+        $l['gesamt'] += is_numeric($z['gesamt'] ?? null) ? (float)$z['gesamt'] : 0.0;
+        $l['me'] = $l['me'] ?: mb_substr(trim((string)($z['me'] ?? '')), 0, 30);
+        $lines[$artnr] = $l;
+    }
+    if (!$lines) {
+        throw new ApiError('Auf der Rechnung wurden keine Artikel erkannt.');
+    }
+    $pdo->beginTransaction();
+    $pdo->prepare('DELETE FROM invoice_lines WHERE round_id = ?')->execute([$roundId]);
+    $pdo->prepare("INSERT INTO invoices (round_id, nr, datum, netto, uploaded_by) VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(round_id) DO UPDATE SET nr = excluded.nr, datum = excluded.datum, netto = excluded.netto,
+                       uploaded_at = datetime('now'), uploaded_by = excluded.uploaded_by")
+        ->execute([$roundId, mb_substr($nr, 0, 40), mb_substr($datum, 0, 20), $netto, $actor]);
+    $ins = $pdo->prepare('INSERT INTO invoice_lines (round_id, artnr, epreis, gpreis, gesamt, me) VALUES (?, ?, ?, ?, ?, ?)');
+    foreach ($lines as $artnr => $l) {
+        $ins->execute([$roundId, (string)$artnr, $l['epreis'], round($l['gpreis'], 2), round($l['gesamt'], 3), $l['me']]);
+    }
+    // Preis je bestelltem Artikel der Runde festlegen
+    $st = $pdo->prepare('SELECT DISTINCT i.artnr, a.ek AS ek_aktuell, rp.ek_bestellt
+                         FROM items i JOIN articles a ON a.artnr = i.artnr
+                         LEFT JOIN round_prices rp ON rp.round_id = i.round_id AND rp.artnr = i.artnr
+                         WHERE i.round_id = ?');
+    $st->execute([$roundId]);
+    $up = $pdo->prepare('INSERT INTO round_prices (round_id, artnr, ek_bestellt, ek_rechnung, ek) VALUES (?, ?, ?, ?, ?)
+                         ON CONFLICT(round_id, artnr) DO UPDATE SET ek_rechnung = excluded.ek_rechnung, ek = excluded.ek');
+    $teurer = 0;
+    foreach ($st->fetchAll() as $r) {
+        $bestellt = $r['ek_bestellt'] !== null ? (float)$r['ek_bestellt'] : (float)$r['ek_aktuell'];
+        $rech = $lines[(string)$r['artnr']]['epreis'] ?? null;
+        $ek = ($rech !== null && $rech > $bestellt + 0.004) ? $rech : $bestellt;
+        if ($ek > $bestellt) {
+            $teurer++;
+        }
+        $up->execute([$roundId, $r['artnr'], $bestellt, $rech, $ek]);
+    }
+    log_event($actor, $roundId, sprintf('%s: Rechnung %s für „%s“ geprüft (%d Positionen, %d teurer)',
+        user_name($actor), $nr, $round['title'], count($lines), $teurer));
+    $pdo->commit();
+}
+
+/** Rechnung entfernen: Preise der Runde wieder aus dem Sortiment. */
+function invoice_delete(int $roundId, int $actor): void
+{
+    $pdo = db();
+    $round = round_row($roundId);
+    $pdo->beginTransaction();
+    foreach (['invoice_lines', 'invoices', 'round_prices'] as $t) {
+        $pdo->prepare("DELETE FROM $t WHERE round_id = ?")->execute([$roundId]);
+    }
+    log_event($actor, $roundId, sprintf('%s: Rechnung für „%s“ entfernt, Preise wieder aus dem Sortiment', user_name($actor), $round['title']));
+    $pdo->commit();
+}
+
+/** Vergleich Bestellung ↔ Rechnung für die Abrechnungsseite. */
+function invoice_check(int $roundId): array
+{
+    $pdo = db();
+    $st = $pdo->prepare('SELECT * FROM invoices WHERE round_id = ?');
+    $st->execute([$roundId]);
+    $inv = $st->fetch();
+    if (!$inv) {
+        return ['invoice' => null];
+    }
+    $st = $pdo->prepare('SELECT il.*, a.name FROM invoice_lines il LEFT JOIN articles a ON a.artnr = il.artnr
+                         WHERE il.round_id = ? ORDER BY CAST(il.artnr AS INTEGER)');
+    $st->execute([$roundId]);
+    $lines = [];
+    foreach ($st->fetchAll() as $l) {
+        $lines[(string)$l['artnr']] = $l;
+    }
+    $st = $pdo->prepare("SELECT i.artnr, a.name, rp.ek_bestellt, rp.ek,
+                                SUM(CASE WHEN i.status = 'aktiv' THEN 1 ELSE 0 END) AS aktiv
+                         FROM items i JOIN articles a ON a.artnr = i.artnr
+                         LEFT JOIN round_prices rp ON rp.round_id = i.round_id AND rp.artnr = i.artnr
+                         WHERE i.round_id = ? GROUP BY i.artnr ORDER BY a.name");
+    $st->execute([$roundId]);
+    $vergleich = [];
+    foreach ($st->fetchAll() as $r) {
+        $key = (string)$r['artnr'];
+        $l = $lines[$key] ?? null;
+        $bestellt = $r['ek_bestellt'] !== null ? (float)$r['ek_bestellt'] : null;
+        $rech = $l !== null && $l['epreis'] !== null ? (float)$l['epreis'] : null;
+        $status = match (true) {
+            $l === null => (int)$r['aktiv'] > 0 ? 'fehlt' : 'storniert',
+            $rech === null || $bestellt === null => 'unklar',
+            $rech > $bestellt + 0.004 => 'teurer',
+            $rech < $bestellt - 0.004 => 'guenstiger',
+            default => 'gleich',
+        };
+        $vergleich[] = [
+            'artnr' => $key, 'name' => $r['name'], 'status' => $status,
+            'ek_bestellt' => $bestellt, 'ek_rechnung' => $rech,
+            'ek' => $r['ek'] !== null ? (float)$r['ek'] : null,
+            'gesamt' => $l !== null ? (float)$l['gesamt'] : null, 'me' => $l['me'] ?? '',
+        ];
+        unset($lines[$key]);
+    }
+    // Übrige Rechnungszeilen sind nicht bestellt; kleine Nummern sind Pfand/Leergut
+    $sonst = [];
+    foreach ($lines as $l) {
+        $sonst[] = [
+            'artnr' => (string)$l['artnr'], 'name' => $l['name'], 'epreis' => $l['epreis'] !== null ? (float)$l['epreis'] : null,
+            'gpreis' => (float)$l['gpreis'], 'gesamt' => (float)$l['gesamt'], 'me' => $l['me'],
+            'pfand' => strlen((string)$l['artnr']) <= 3,
+        ];
+    }
+    return ['invoice' => $inv, 'vergleich' => $vergleich, 'sonst' => $sonst];
 }

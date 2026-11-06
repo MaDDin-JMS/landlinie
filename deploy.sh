@@ -15,6 +15,7 @@ W() { command -v cygpath >/dev/null && cygpath -w "$1" || printf '%s' "$1"; }
 
 dateien=(index.html api.php manifest.webmanifest .htaccess
          assets/app.js assets/app.css assets/icon.svg
+         assets/vendor/pdf.min.mjs assets/vendor/pdf.worker.min.mjs assets/vendor/LICENSE
          lib/db.php lib/logic.php lib/landlinie.php lib/.htaccess
          data/.htaccess)
 [ "${1:-}" = --config ] && dateien+=(data/config.php)

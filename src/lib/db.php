@@ -161,6 +161,37 @@ function migrate(PDO $pdo): void
             ALTER TABLE pfand ADD COLUMN qty REAL NOT NULL DEFAULT 1;
             ALTER TABLE pfand ADD COLUMN returned_at TEXT;
         SQL,
+        // Landlinie-Rechnung je Runde: E-Preis (netto je Einheit) prüfen.
+        // round_prices friert den Preis der Runde ein: ek_bestellt = Shop-Preis
+        // bei der ersten Prüfung, ek = endgültiger Preis (teurer auf der
+        // Rechnung → Rechnungspreis, sonst bleibt der bestellte Preis).
+        5 => <<<SQL
+            CREATE TABLE invoices (
+                round_id INTEGER PRIMARY KEY REFERENCES rounds(id) ON DELETE CASCADE,
+                nr TEXT NOT NULL,
+                datum TEXT NOT NULL DEFAULT '',
+                netto REAL,
+                uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
+                uploaded_by INTEGER
+            );
+            CREATE TABLE invoice_lines (
+                round_id INTEGER NOT NULL REFERENCES rounds(id) ON DELETE CASCADE,
+                artnr TEXT NOT NULL,
+                epreis REAL,
+                gpreis REAL,
+                gesamt REAL,
+                me TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (round_id, artnr)
+            );
+            CREATE TABLE round_prices (
+                round_id INTEGER NOT NULL REFERENCES rounds(id) ON DELETE CASCADE,
+                artnr TEXT NOT NULL,
+                ek_bestellt REAL NOT NULL,
+                ek_rechnung REAL,
+                ek REAL NOT NULL,
+                PRIMARY KEY (round_id, artnr)
+            );
+        SQL,
     ];
     foreach ($steps as $v => $sql) {
         if ($v > $version) {

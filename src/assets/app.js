@@ -811,12 +811,118 @@ function admLieferung(box) {
   }));
 }
 
+/*
+ * Landlinie-Rechnung (PDF) im Browser lesen – pdf.js liegt selbst gehostet
+ * unter assets/vendor (pdfjs-dist 4.10.38, Legacy-Build, Apache-2.0).
+ * Spalten werden über die Kopfzeile (Art.Nr., ME, Gesamt, E-Preis, G-Preis)
+ * per x-Position zugeordnet; Zeilen unter „Gesamt (netto)“ (MwSt-Tabelle)
+ * zählen nicht. Kontrolle: Summe G-Preis = Gesamt (netto).
+ */
+async function rechnungLesen(datei) {
+  const pdfjs = await import('./vendor/pdf.min.mjs');
+  pdfjs.GlobalWorkerOptions.workerSrc = 'assets/vendor/pdf.worker.min.mjs';
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(await datei.arrayBuffer()), isEvalSupported: false }).promise;
+  const zahl = (s) => +s.replace(/\./g, '').replace(',', '.');
+  const ZAHL = /^-?\d{1,3}(\.\d{3})*,\d{2,3}$/;
+  const ohneMwst = (s) => s.replace(/(\d,\d\d)(7|19)$/, '$1'); // „10,7419“ = 10,74 + MwSt-Kennzeichen 19
+  let spalten = null, nr = '', datum = '', netto = null;
+  const zeilen = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const tc = await (await doc.getPage(p)).getTextContent();
+    const its = tc.items.filter((i) => i.str.trim()).map((i) => ({ s: i.str.trim(), x: i.transform[4], y: i.transform[5], w: i.width }));
+    const kopf = (t) => its.find((i) => i.s === t);
+    if (!spalten && kopf('E-Preis') && kopf('Art.Nr.')) {
+      const mitte = (t) => { const k = kopf(t); return k ? k.x + k.w / 2 : null; };
+      spalten = { art: kopf('Art.Nr.').x, epreis: mitte('E-Preis'), gpreis: mitte('G-Preis'), gesamt: mitte('Gesamt'), me: mitte('ME'), kopfY: kopf('E-Preis').y };
+    }
+    const text = its.map((i) => i.s).join(' ');
+    nr ||= (text.match(/\b\d{6,10}-[A-Z]{2,4}\b/) || [''])[0];
+    datum ||= (text.match(/\b\d{2}\.\d{2}\.\d{4}\b/) || [''])[0];
+    const nt = its.find((i) => /^Gesamt \(netto\)/.test(i.s));
+    if (nt && netto === null) {
+      const z = its.filter((i) => Math.abs(i.y - nt.y) < 3 && ZAHL.test(i.s)).sort((a, b) => b.x - a.x)[0];
+      if (z) netto = zahl(z.s);
+    }
+    if (!spalten) continue;
+    const reihen = [];
+    for (const i of [...its].sort((a, b) => b.y - a.y || a.x - b.x)) {
+      const r = reihen.find((x) => Math.abs(x.y - i.y) < 3);
+      r ? r.its.push(i) : reihen.push({ y: i.y, its: [i] });
+    }
+    for (const r of reihen) {
+      if (p === 1 && r.y >= spalten.kopfY - 1) continue;
+      if (nt && r.y <= nt.y + 1) continue;
+      const art = r.its.find((i) => Math.abs(i.x - spalten.art) < 15 && /^\d{1,10}$/.test(i.s));
+      if (!art) continue;
+      const nah = (m) => r.its.filter((i) => ZAHL.test(ohneMwst(i.s)))
+        .map((i) => ({ i, d: Math.abs(i.x + i.w / 2 - m) })).sort((a, b) => a.d - b.d)[0];
+      const ep = nah(spalten.epreis), gp = nah(spalten.gpreis), ge = nah(spalten.gesamt);
+      const me = r.its.filter((i) => !ZAHL.test(i.s)).map((i) => ({ i, d: Math.abs(i.x + i.w / 2 - spalten.me) })).sort((a, b) => a.d - b.d)[0];
+      zeilen.push({
+        artnr: art.s,
+        epreis: ep && ep.d < 40 ? zahl(ep.i.s) : null,
+        gpreis: gp && gp.d < 60 ? zahl(ohneMwst(gp.i.s)) : null,
+        gesamt: ge && ge.d < 40 ? zahl(ge.i.s) : null,
+        me: me && me.d < 40 ? me.i.s : '',
+      });
+    }
+  }
+  if (!spalten) throw new Error('Das sieht nicht nach einer Landlinie-Rechnung aus (Spalte „E-Preis“ fehlt).');
+  const summe = Math.round(zeilen.reduce((s, z) => s + (z.gpreis || 0), 0) * 100) / 100;
+  return { nr, datum, netto, zeilen, summe };
+}
+
+function rechnungKarte(r, inv) {
+  if (!inv.invoice) {
+    return `<div class="card no-print"><h2>Rechnung von Landlinie</h2>
+      <p class="small">Rechnung (PDF) hochladen: Die E-Preise werden mit der Bestellung verglichen. Ist ein Artikel teurer geworden, gilt der Rechnungspreis.</p>
+      <label class="btn">Rechnung hochladen<input type="file" id="inv-file" accept="application/pdf,.pdf" hidden></label></div>`;
+  }
+  const v = inv.vergleich;
+  const teurer = v.filter((x) => x.status === 'teurer');
+  const guenstiger = v.filter((x) => x.status === 'guenstiger');
+  const fehlt = v.filter((x) => x.status === 'fehlt' || x.status === 'unklar');
+  const sonst = inv.sonst.filter((x) => !x.pfand);
+  const pfand = inv.sonst.filter((x) => x.pfand);
+  const zeile = (x, a, b) => `<tr><td>${esc(x.name || x.artnr)} <span class="muted small">${esc(x.artnr)}</span></td><td class="n">${a}</td><td class="n">${b}</td></tr>`;
+  return `<div class="card"><div class="section-title" style="margin-top:0"><h2>Rechnung ${esc(inv.invoice.nr)} vom ${esc(inv.invoice.datum)}</h2>
+      <span class="no-print"><label class="btn sm secondary">Neu hochladen<input type="file" id="inv-file" accept="application/pdf,.pdf" hidden></label>
+      <button class="btn sm secondary" id="inv-del">Entfernen</button></span></div>
+    <p class="small">${v.length} bestellte Artikel geprüft · ${teurer.length ? `<b>${teurer.length} teurer – Rechnungspreis gilt</b>` : 'nichts teurer geworden'} · ${guenstiger.length} günstiger (Bestellpreis bleibt)${fehlt.length ? ` · <b>${fehlt.length} nicht auf der Rechnung</b>` : ''}</p>
+    ${teurer.length ? `<h3>Teurer geworden (E-Preis netto)</h3><table><thead><tr><th>Artikel</th><th class="n">bestellt</th><th class="n">Rechnung = final</th></tr></thead><tbody>
+      ${teurer.map((x) => zeile(x, eur(x.ek_bestellt), `<b>${eur(x.ek_rechnung)}</b>`)).join('')}</tbody></table>` : ''}
+    ${fehlt.length ? `<h3>Bestellt, aber nicht auf der Rechnung</h3><p class="small muted">Falls nicht geliefert: unter „Lieferung“ als nicht geliefert markieren.</p><table><tbody>
+      ${fehlt.map((x) => zeile(x, '', '')).join('')}</tbody></table>` : ''}
+    ${guenstiger.length ? `<details><summary class="small">Günstiger auf der Rechnung (${guenstiger.length}) – Bestellpreis bleibt</summary><table><tbody>
+      ${guenstiger.map((x) => zeile(x, eur(x.ek_bestellt), eur(x.ek_rechnung))).join('')}</tbody></table></details>` : ''}
+    ${sonst.length ? `<details><summary class="small">Auf der Rechnung, aber nicht bestellt (${sonst.length})</summary><table><tbody>
+      ${sonst.map((x) => zeile(x, `${num(x.gesamt)} ${esc(x.me)}`, eur(x.gpreis))).join('')}</tbody></table></details>` : ''}
+    ${pfand.length ? `<p class="small muted">Pfand/Leergut auf der Rechnung (Art.-Nr. ${pfand.map((x) => esc(x.artnr)).join(', ')}) wird keiner Bestellerin zugeordnet.</p>` : ''}
+  </div>`;
+}
+
+async function rechnungHochladen(r, datei) {
+  let res;
+  try { res = await rechnungLesen(datei); } catch (e) { toast('PDF nicht lesbar: ' + e.message, true); return; }
+  const ok = res.netto !== null && Math.abs(res.summe - res.netto) < 0.02;
+  const frage = `Rechnung ${res.nr || '(ohne Nr.)'} vom ${res.datum || '?'}: ${res.zeilen.length} Positionen gelesen.\n`
+    + (ok ? `Kontrolle ok: Summe ${eur(res.summe)} = Gesamt netto.` : `Achtung: Summe der Positionen ${eur(res.summe)}, Gesamt netto auf der Rechnung ${res.netto === null ? 'nicht gefunden' : eur(res.netto)} – evtl. wurde nicht alles gelesen.`)
+    + `\n\nFür „${r.title}“ übernehmen?`;
+  if (!confirm(frage)) return;
+  await run(() => api('invoice_apply', { round_id: r.id, nr: res.nr, datum: res.datum, netto: res.netto, zeilen: res.zeilen }), 'Rechnung geprüft');
+  render();
+}
+
 async function admAbrechnung(box) {
   const r = S.state.round;
   if (!r) { box.innerHTML = '<div class="empty">Keine Runde.</div>'; return; }
-  const res = await run(() => api('settlement', undefined, `&round_id=${r.id}`));
+  const [res, inv] = await Promise.all([
+    run(() => api('settlement', undefined, `&round_id=${r.id}`)),
+    run(() => api('invoice', undefined, `&round_id=${r.id}`)),
+  ]);
   const total = res.rows.reduce((s, x) => s + x.summe, 0);
   box.innerHTML = `<div class="row no-print" style="margin-bottom:10px"><button class="btn" onclick="window.print()">Drucken</button></div>
+    ${rechnungKarte(r, inv)}
     <div class="card table-wrap"><h2>Abrechnung ${esc(r.title)}</h2><table><thead><tr><th>Wer</th><th class="n">Ware</th><th class="n">Summe</th><th>bezahlt</th></tr></thead>
       <tbody>${res.rows.map((x) => `<tr><td><a href="#" data-detail="${x.user_id}">${esc(x.name)}</a></td><td class="n">${eur(x.ware)}</td>
         <td class="n sum">${eur(x.summe)}</td><td><input type="checkbox" data-paid="${x.user_id}" ${x.paid ? 'checked' : ''}></td></tr>`).join('')}
@@ -827,6 +933,14 @@ async function admAbrechnung(box) {
       ${x.extra ? `<tr><td>${esc(r.extra_text)}</td><td></td><td></td><td class="n">${eur(x.extra)}</td></tr>` : ''}</tbody></table></div>`).join('')}`;
   box.querySelectorAll('[data-paid]').forEach((c) => (c.onchange = () => run(() => api('payment', { round_id: r.id, user_id: +c.dataset.paid, paid: c.checked ? 1 : 0 }), 'Gespeichert')));
   box.querySelectorAll('[data-detail]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); $('#det-' + a.dataset.detail).scrollIntoView({ behavior: 'smooth' }); }));
+  const datei = $('#inv-file', box);
+  if (datei) datei.onchange = () => { if (datei.files[0]) rechnungHochladen(r, datei.files[0]); };
+  const weg = $('#inv-del', box);
+  if (weg) weg.onclick = async () => {
+    if (!confirm('Rechnung entfernen? Die Preise der Runde kommen dann wieder aus dem Sortiment.')) return;
+    await run(() => api('invoice_delete', { round_id: r.id }), 'Rechnung entfernt');
+    render();
+  };
 }
 
 function admLeute(box) {
