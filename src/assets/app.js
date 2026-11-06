@@ -492,10 +492,28 @@ function viewKorb(m) {
       `<button class="chip ${u.id === uid ? 'on' : ''}" data-ku="${u.id}">${esc(u.name)}${u.id === st.me.id ? ' (ich)' : ''} · ${myItems(u.id).filter((i) => i.status === 'aktiv').length}</button>`).join('')}</div>
     ${!st.round ? '<div class="empty">Keine Bestellrunde.</div>' : ''}
     ${st.round && !items.length ? `<div class="empty">${uid === st.me.id ? 'Dein' : esc(userName(uid)) + 's'} Korb ist leer.<br><a href="#/shop">Zum Shop</a></div>` : ''}
+    <div id="korb-zahlen"></div>
     ${items.map((it) => korbCard(it, uid)).join('')}
     ${items.length ? `<div class="card row"><div class="grow">Summe ${esc(userName(uid))} (brutto, Pfand wird nicht berechnet)</div><div class="price">${eur(sum)}</div></div>` : ''}`;
   m.querySelectorAll('[data-ku]').forEach((b) => (b.onclick = () => { S.korbUser = +b.dataset.ku; viewKorb(m); }));
   wireItemButtons(m, uid);
+  if (st.round && ['geliefert', 'abgerechnet'].includes(st.round.status)) zuZahlen(st.round, uid);
+}
+
+/* Endbetrag je Person nach der Lieferung: gewogene Mengen, nicht Geliefertes,
+   geprüfte Rechnungspreise und Zusatzkosten sind drin (wie Admin → Abrechnung). */
+async function zuZahlen(r, uid) {
+  let res;
+  try { res = await api('settlement', undefined, `&round_id=${r.id}`); } catch { return; }
+  const box = $('#korb-zahlen');
+  const x = res.rows.find((row) => row.user_id === uid);
+  if (!box || !x || S.korbUser !== uid) return;
+  box.innerHTML = `<div class="card"><div class="row"><div class="grow"><h2 style="margin:0">Zu zahlen: ${esc(x.name)}</h2>
+      <span class="small muted">${res.rechnung ? `Preise laut Landlinie-Rechnung ${esc(res.rechnung.nr)} geprüft` : 'Rechnung noch nicht geprüft – Betrag kann sich noch ändern'}</span></div>
+      <div class="price">${eur(x.summe)}</div></div>
+    <table><tbody>${x.zeilen.map((z) => `<tr><td>${esc(z.name)}</td><td class="n">${num(z.qty)} ${esc(z.einheit)}${z.gewogen ? ' ⚖' : ''}</td><td class="n">${eur(z.betrag)}</td></tr>`).join('')}
+      ${x.extra ? `<tr><td>${esc(r.extra_text)}</td><td></td><td class="n">${eur(x.extra)}</td></tr>` : ''}</tbody></table>
+    <p class="small">${x.paid ? '✅ bezahlt' : 'noch nicht bezahlt'}</p></div>`;
 }
 
 function itemStatus(it) {
@@ -882,8 +900,7 @@ function rechnungKarte(r, inv) {
   const teurer = v.filter((x) => x.status === 'teurer');
   const guenstiger = v.filter((x) => x.status === 'guenstiger');
   const fehlt = v.filter((x) => x.status === 'fehlt' || x.status === 'unklar');
-  const sonst = inv.sonst.filter((x) => !x.pfand);
-  const pfand = inv.sonst.filter((x) => x.pfand);
+  const sonst = inv.sonst;
   const zeile = (x, a, b) => `<tr><td>${esc(x.name || x.artnr)} <span class="muted small">${esc(x.artnr)}</span></td><td class="n">${a}</td><td class="n">${b}</td></tr>`;
   return `<div class="card"><div class="section-title" style="margin-top:0"><h2>Rechnung ${esc(inv.invoice.nr)} vom ${esc(inv.invoice.datum)}</h2>
       <span class="no-print"><label class="btn sm secondary">Neu hochladen<input type="file" id="inv-file" accept="application/pdf,.pdf" hidden></label>
@@ -895,9 +912,10 @@ function rechnungKarte(r, inv) {
       ${fehlt.map((x) => zeile(x, '', '')).join('')}</tbody></table>` : ''}
     ${guenstiger.length ? `<details><summary class="small">Günstiger auf der Rechnung (${guenstiger.length}) – Bestellpreis bleibt</summary><table><tbody>
       ${guenstiger.map((x) => zeile(x, eur(x.ek_bestellt), eur(x.ek_rechnung))).join('')}</tbody></table></details>` : ''}
-    ${sonst.length ? `<details><summary class="small">Auf der Rechnung, aber nicht bestellt (${sonst.length})</summary><table><tbody>
-      ${sonst.map((x) => zeile(x, `${num(x.gesamt)} ${esc(x.me)}`, eur(x.gpreis))).join('')}</tbody></table></details>` : ''}
-    ${pfand.length ? `<p class="small muted">Pfand/Leergut auf der Rechnung (Art.-Nr. ${pfand.map((x) => esc(x.artnr)).join(', ')}) wird keiner Bestellerin zugeordnet.</p>` : ''}
+    ${sonst.length ? `<h3>Auf der Rechnung, aber nicht bestellt</h3><p class="small muted">Wird keiner Bestellerin berechnet. Mit 🗑 aus der Übersicht entfernen.</p><table><tbody>
+      ${sonst.map((x) => `<tr><td>${esc(x.name || (x.pfand ? 'Pfand/Leergut' : 'Artikel'))} <span class="muted small">${esc(x.artnr)}</span></td>
+        <td class="n">${num(x.gesamt)} ${esc(x.me)}</td><td class="n">${eur(x.gpreis)}</td>
+        <td class="no-print"><button class="btn sm secondary" data-inv-hide="${esc(x.artnr)}" title="Aus der Übersicht entfernen" aria-label="${esc(x.artnr)} aus der Übersicht entfernen">🗑</button></td></tr>`).join('')}</tbody></table>` : ''}
   </div>`;
 }
 
@@ -935,6 +953,10 @@ async function admAbrechnung(box) {
   box.querySelectorAll('[data-detail]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); $('#det-' + a.dataset.detail).scrollIntoView({ behavior: 'smooth' }); }));
   const datei = $('#inv-file', box);
   if (datei) datei.onchange = () => { if (datei.files[0]) rechnungHochladen(r, datei.files[0]); };
+  box.querySelectorAll('[data-inv-hide]').forEach((b) => (b.onclick = async () => {
+    await run(() => api('invoice_line_hide', { round_id: r.id, artnr: b.dataset.invHide }), 'Entfernt');
+    render();
+  }));
   const weg = $('#inv-del', box);
   if (weg) weg.onclick = async () => {
     if (!confirm('Rechnung entfernen? Die Preise der Runde kommen dann wieder aus dem Sortiment.')) return;

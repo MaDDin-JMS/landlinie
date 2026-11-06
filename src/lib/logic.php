@@ -584,14 +584,19 @@ function invoice_apply(int $roundId, string $nr, string $datum, ?float $netto, a
         throw new ApiError('Auf der Rechnung wurden keine Artikel erkannt.');
     }
     $pdo->beginTransaction();
+    // Ausgeblendete Zeilen bleiben beim erneuten Hochladen ausgeblendet
+    $st = $pdo->prepare('SELECT artnr FROM invoice_lines WHERE round_id = ? AND hidden = 1');
+    $st->execute([$roundId]);
+    $hidden = array_flip(array_map('strval', $st->fetchAll(PDO::FETCH_COLUMN)));
     $pdo->prepare('DELETE FROM invoice_lines WHERE round_id = ?')->execute([$roundId]);
     $pdo->prepare("INSERT INTO invoices (round_id, nr, datum, netto, uploaded_by) VALUES (?, ?, ?, ?, ?)
                    ON CONFLICT(round_id) DO UPDATE SET nr = excluded.nr, datum = excluded.datum, netto = excluded.netto,
                        uploaded_at = datetime('now'), uploaded_by = excluded.uploaded_by")
         ->execute([$roundId, mb_substr($nr, 0, 40), mb_substr($datum, 0, 20), $netto, $actor]);
-    $ins = $pdo->prepare('INSERT INTO invoice_lines (round_id, artnr, epreis, gpreis, gesamt, me) VALUES (?, ?, ?, ?, ?, ?)');
+    $ins = $pdo->prepare('INSERT INTO invoice_lines (round_id, artnr, epreis, gpreis, gesamt, me, hidden) VALUES (?, ?, ?, ?, ?, ?, ?)');
     foreach ($lines as $artnr => $l) {
-        $ins->execute([$roundId, (string)$artnr, $l['epreis'], round($l['gpreis'], 2), round($l['gesamt'], 3), $l['me']]);
+        $ins->execute([$roundId, (string)$artnr, $l['epreis'], round($l['gpreis'], 2), round($l['gesamt'], 3), $l['me'],
+            isset($hidden[(string)$artnr]) ? 1 : 0]);
     }
     // Preis je bestelltem Artikel der Runde festlegen
     $st = $pdo->prepare('SELECT DISTINCT i.artnr, a.ek AS ek_aktuell, rp.ek_bestellt
@@ -676,6 +681,9 @@ function invoice_check(int $roundId): array
     // Übrige Rechnungszeilen sind nicht bestellt; kleine Nummern sind Pfand/Leergut
     $sonst = [];
     foreach ($lines as $l) {
+        if ((int)$l['hidden']) {
+            continue;
+        }
         $sonst[] = [
             'artnr' => (string)$l['artnr'], 'name' => $l['name'], 'epreis' => $l['epreis'] !== null ? (float)$l['epreis'] : null,
             'gpreis' => (float)$l['gpreis'], 'gesamt' => (float)$l['gesamt'], 'me' => $l['me'],

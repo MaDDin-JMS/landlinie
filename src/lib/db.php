@@ -192,6 +192,10 @@ function migrate(PDO $pdo): void
                 PRIMARY KEY (round_id, artnr)
             );
         SQL,
+        // Nicht bestellte Rechnungszeilen per Papierkorb ausblenden
+        6 => <<<SQL
+            ALTER TABLE invoice_lines ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+        SQL,
     ];
     foreach ($steps as $v => $sql) {
         if ($v > $version) {

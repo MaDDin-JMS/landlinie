@@ -388,7 +388,9 @@ try {
 
         case 'settlement':
             me();
-            out(['rows' => settlement((int)arg('round_id', 0))]);
+            $st = $pdo->prepare('SELECT nr, datum FROM invoices WHERE round_id = ?');
+            $st->execute([(int)arg('round_id', 0)]);
+            out(['rows' => settlement((int)arg('round_id', 0)), 'rechnung' => $st->fetch() ?: null]);
 
         case 'invoice':
             me();
@@ -404,6 +406,20 @@ try {
             invoice_apply((int)arg('round_id', 0), trim((string)arg('nr', '')), trim((string)arg('datum', '')),
                 is_numeric($netto) ? (float)$netto : null, $zeilen, (int)$me['id']);
             out(invoice_check((int)arg('round_id', 0)));
+
+        case 'invoice_line_hide':
+            // Nur Zeilen, die in der Runde nicht bestellt sind (bestellte bestimmen den Preis)
+            $me = admin();
+            $roundId = (int)arg('round_id', 0);
+            $artnr = (string)arg('artnr', '');
+            $st = $pdo->prepare('UPDATE invoice_lines SET hidden = 1 WHERE round_id = ? AND artnr = ?
+                                   AND NOT EXISTS (SELECT 1 FROM items WHERE round_id = ? AND artnr = ?)');
+            $st->execute([$roundId, $artnr, $roundId, $artnr]);
+            if ($st->rowCount() === 0) {
+                throw new ApiError('Diese Zeile kann nicht ausgeblendet werden.', 404);
+            }
+            log_event((int)$me['id'], $roundId, sprintf('%s: Rechnungszeile %s ausgeblendet (nicht bestellt)', $me['name'], $artnr));
+            out(invoice_check($roundId));
 
         case 'invoice_delete':
             $me = admin();
