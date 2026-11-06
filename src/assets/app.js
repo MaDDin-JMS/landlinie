@@ -507,13 +507,14 @@ async function zuZahlen(r, uid) {
   try { res = await api('settlement', undefined, `&round_id=${r.id}`); } catch { return; }
   const box = $('#korb-zahlen');
   const x = res.rows.find((row) => row.user_id === uid);
-  if (!box || !x || S.korbUser !== uid) return;
+  // Bezahlt → kein „Zu zahlen“-Kasten mehr (Martin 06.11.2026)
+  if (!box || !x || x.paid || S.korbUser !== uid) return;
   box.innerHTML = `<div class="card"><div class="row"><div class="grow"><h2 style="margin:0">Zu zahlen: ${esc(x.name)}</h2>
       <span class="small muted">${res.rechnung ? `Preise laut Landlinie-Rechnung ${esc(res.rechnung.nr)} geprüft` : 'Rechnung noch nicht geprüft – Betrag kann sich noch ändern'}</span></div>
       <div class="price">${eur(x.summe)}</div></div>
     <table><tbody>${x.zeilen.map((z) => `<tr><td>${esc(z.name)}</td><td class="n">${num(z.qty)} ${esc(z.einheit)}${z.gewogen ? ' ⚖' : ''}</td><td class="n">${eur(z.betrag)}</td></tr>`).join('')}
       ${x.extra ? `<tr><td>${esc(r.extra_text)}</td><td></td><td class="n">${eur(x.extra)}</td></tr>` : ''}</tbody></table>
-    <p class="small">${x.paid ? '✅ bezahlt' : 'noch nicht bezahlt'}</p></div>`;
+    <p class="small">noch nicht bezahlt</p></div>`;
 }
 
 function itemStatus(it) {
