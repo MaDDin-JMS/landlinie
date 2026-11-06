@@ -171,11 +171,13 @@ try {
         case 'state':
             $me = me();
             $round = current_round();
+            $currentId = $round ? (int)$round['id'] : null;
             $roundId = (int)(arg('round_id') ?: ($round['id'] ?? 0));
             if ($roundId && (!$round || $roundId !== (int)$round['id'])) {
                 $round = auto_close(round_row($roundId));
             }
             out([
+                'current_round_id' => $currentId,
                 'me' => ['id' => (int)$me['id'], 'name' => $me['name'], 'is_admin' => (int)$me['is_admin']],
                 'users' => users_public(true),
                 'round' => $round,

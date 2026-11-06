@@ -161,9 +161,12 @@ function render() {
   if (r) {
     sub = r.status === 'offen' ? `Bestellschluss ${dt(r.deadline)}` : `Status: ${r.status}`;
   }
+  const wahl = st.rounds.length > 1;
+  const alt = r && st.current_round_id && r.id !== st.current_round_id;
+  const aktuell = st.rounds.find((x) => x.id === st.current_round_id);
   $('#app').innerHTML = `
     <header class="top">
-      <div class="title"><b>${esc(r ? r.title : 'Bestellgemeinschaft')}</b><span>${esc(sub)}</span></div>
+      ${wahl ? `<button class="title" id="round-btn" style="all:unset;display:block;flex:1;min-width:0;cursor:pointer;color:inherit;text-align:left" aria-label="Bestellrunde wechseln">` : '<div class="title">'}<b>${esc(r ? r.title : 'Bestellgemeinschaft')}${wahl ? ' ▾' : ''}</b><span>${esc(sub)}</span>${wahl ? '</button>' : '</div>'}
       <button class="chip-user" id="me-btn">${esc(st.me.name)} ▾</button>
     </header>
     <nav class="nav">
@@ -173,14 +176,28 @@ function render() {
       ${navLink('pfand', '♻️', 'Leergut')}
       ${st.me.is_admin ? navLink('admin', '⚙️', 'Admin') : ''}
     </nav>
+    ${alt ? `<div class="card row no-print" style="margin:8px 12px 0"><div class="grow small">Du siehst eine andere Runde. Neue Bestellungen gehen in die aktuelle${aktuell ? ` („${esc(aktuell.title)}“)` : ''}.</div>
+      <button class="btn sm secondary" id="round-back">Zur aktuellen</button></div>` : ''}
     <main id="main"></main>`;
   $('#me-btn').onclick = meMenu;
+  if (wahl) $('#round-btn').onclick = rundeWaehlen;
+  if (alt) $('#round-back').onclick = async () => { await run(() => load(st.current_round_id)); render(); };
   const m = $('#main');
   ({ shop: viewShop, korb: viewKorb, alle: viewAlle, pfand: viewPfand, admin: viewAdmin })[S.view](m);
 }
 
 function navLink(v, ico, label, badge) {
   return `<a href="#/${v}" class="${S.view === v ? 'active' : ''}"><span class="ico">${ico}</span>${label}${badge ? `<span class="badge">${badge}</span>` : ''}</a>`;
+}
+
+// Bestellrunde wechseln – für alle, z. B. um nach der Lieferung den eigenen Betrag zu sehen
+function rundeWaehlen() {
+  const st = S.state;
+  modal(`<div class="head"><h2>Bestellrunde</h2><button class="x" data-close>×</button></div>
+    ${st.rounds.map((x) => `<button class="btn ${x.id === st.round?.id ? '' : 'secondary'} block" style="margin-bottom:8px;text-align:left" data-rw="${x.id}">
+      ${esc(x.title)} <span class="small">· ${esc(x.status)}${x.id === st.current_round_id ? ' · aktuell' : ''}</span></button>`).join('')}`, (root, close) => {
+    root.querySelectorAll('[data-rw]').forEach((b) => (b.onclick = async () => { close(); await run(() => load(+b.dataset.rw)); render(); }));
+  });
 }
 
 function meMenu() {
