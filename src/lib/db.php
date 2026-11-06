@@ -196,6 +196,15 @@ function migrate(PDO $pdo): void
         6 => <<<SQL
             ALTER TABLE invoice_lines ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
         SQL,
+        // Vor dem ersten täglichen Sortiment-Abgleich: Preise bereits
+        // geschlossener Runden einfrieren (Stand = Preis bei der Bestellung)
+        7 => <<<SQL
+            INSERT INTO round_prices (round_id, artnr, ek_bestellt, ek)
+            SELECT DISTINCT i.round_id, i.artnr, a.ek, a.ek
+            FROM items i JOIN articles a ON a.artnr = i.artnr JOIN rounds r ON r.id = i.round_id
+            WHERE r.status <> 'offen'
+            ON CONFLICT(round_id, artnr) DO NOTHING;
+        SQL,
     ];
     foreach ($steps as $v => $sql) {
         if ($v > $version) {

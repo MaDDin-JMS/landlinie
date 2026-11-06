@@ -13,7 +13,7 @@ chmod 600 "$NETRC"
 printf 'machine %s login %s password %s\n' "$LL_FTP_HOST" "$LL_FTP_USER" "$LL_FTP_PW" > "$NETRC"
 W() { command -v cygpath >/dev/null && cygpath -w "$1" || printf '%s' "$1"; }
 
-dateien=(index.html api.php manifest.webmanifest .htaccess
+dateien=(index.html api.php cron.php manifest.webmanifest .htaccess
          assets/app.js assets/app.css assets/icon.svg
          assets/vendor/pdf.min.mjs assets/vendor/pdf.worker.min.mjs assets/vendor/LICENSE
          lib/db.php lib/logic.php lib/landlinie.php lib/.htaccess

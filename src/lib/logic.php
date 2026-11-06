@@ -350,6 +350,7 @@ function close_round(int $roundId, ?int $actor): array
         }
     }
     $pdo->prepare("UPDATE rounds SET status = 'geschlossen', closed_at = datetime('now') WHERE id = ?")->execute([$roundId]);
+    freeze_prices($roundId);
     log_event($actor, $roundId, ($actor ? user_name($actor) : 'System') . ': Bestellschluss'
         . ($dropped ? '. Entfallen: ' . implode('; ', $dropped) : ', alles ist aufgegangen.'));
     return $dropped;
@@ -360,7 +361,44 @@ function reopen_round(int $roundId, int $actor): void
     $pdo = db();
     $pdo->prepare("UPDATE items SET status = 'aktiv' WHERE round_id = ? AND status = 'entfallen'")->execute([$roundId]);
     $pdo->prepare("UPDATE rounds SET status = 'offen', closed_at = NULL WHERE id = ?")->execute([$roundId]);
+    // Wieder offen → Preise folgen wieder dem Sortiment (außer nach geprüfter Rechnung)
+    $pdo->prepare('DELETE FROM round_prices WHERE round_id = ? AND NOT EXISTS (SELECT 1 FROM invoices WHERE round_id = ?)')
+        ->execute([$roundId, $roundId]);
     log_event($actor, $roundId, user_name($actor) . ': Runde wieder geöffnet');
+}
+
+/**
+ * Bestellpreise der Runde einfrieren (beim Bestellschluss): Das Sortiment wird
+ * täglich aktualisiert, die Abrechnung soll aber vom Preis bei der Bestellung
+ * ausgehen – teurer wird es nur über die geprüfte Rechnung.
+ */
+function freeze_prices(int $roundId): void
+{
+    db()->prepare('INSERT INTO round_prices (round_id, artnr, ek_bestellt, ek)
+                   SELECT DISTINCT i.round_id, i.artnr, a.ek, a.ek FROM items i JOIN articles a ON a.artnr = i.artnr
+                   WHERE i.round_id = ?
+                   ON CONFLICT(round_id, artnr) DO NOTHING')->execute([$roundId]);
+}
+
+/**
+ * Komplettes Sortiment in einem Lauf holen (täglicher Cronjob). Fehlt eine
+ * Warengruppe, wird nichts ausgelistet – lieber ein Tag alte Daten als
+ * fälschlich verschwundene Artikel.
+ */
+function shop_sync_all(): array
+{
+    $pdo = db();
+    $started = (string)$pdo->query("SELECT datetime('now')")->fetchColumn();
+    $cats = shop_login_and_categories();
+    $n = 0;
+    foreach ($cats as $c) {
+        $n += shop_sync_category($c['code']);
+    }
+    $hidden = shop_sync_finish($started);
+    set_setting('sortiment_ts', (string)time());
+    $aktiv = (int)$pdo->query('SELECT COUNT(*) FROM articles WHERE active = 1')->fetchColumn();
+    log_event(null, null, sprintf('System: Sortiment automatisch aktualisiert (%d Artikel, %d ausgelistet)', $aktiv, $hidden));
+    return ['gruppen' => count($cats), 'artikel' => $aktiv, 'ausgelistet' => $hidden];
 }
 
 /** Alle Positionen einer Runde mit Artikel, Berechnung und Personen. */
