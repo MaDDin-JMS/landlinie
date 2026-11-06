@@ -489,6 +489,35 @@ try {
             }
             out(['ok' => true]);
 
+        case 'user_delete':
+            // Endgültig löschen nur, wenn nichts an der Bestellerin hängt
+            // (Bestellungen, Anteile, Zahlungen, Pfand) – sonst deaktivieren,
+            // damit Abrechnungen vollständig bleiben. Das Protokoll bleibt.
+            $me = admin();
+            $st = $pdo->prepare('SELECT id, name, is_admin FROM users WHERE id = ?');
+            $st->execute([(int)arg('id', 0)]);
+            $u = $st->fetch();
+            if (!$u) {
+                throw new ApiError('Bestellerin nicht gefunden', 404);
+            }
+            if ((int)$u['id'] === (int)$me['id']) {
+                throw new ApiError('Du kannst dich nicht selbst löschen.');
+            }
+            $st = $pdo->prepare('SELECT (SELECT COUNT(*) FROM items WHERE owner_id = :id)
+                                      + (SELECT COUNT(*) FROM allocs WHERE user_id = :id)
+                                      + (SELECT COUNT(*) FROM payments WHERE user_id = :id)
+                                      + (SELECT COUNT(*) FROM pfand WHERE user_id = :id OR created_by = :id)');
+            $st->execute([':id' => $u['id']]);
+            if ((int)$st->fetchColumn() > 0) {
+                throw new ApiError($u['name'] . ' hat schon Bestellungen, Zahlungen oder Pfand. Bitte stattdessen deaktivieren (Häkchen „aktiv“ entfernen).');
+            }
+            if ((int)$u['is_admin'] && (int)$pdo->query('SELECT COUNT(*) FROM users WHERE is_admin = 1 AND active = 1')->fetchColumn() <= 1) {
+                throw new ApiError('Die letzte Admin-Bestellerin kann nicht gelöscht werden.');
+            }
+            $pdo->prepare('DELETE FROM users WHERE id = ?')->execute([$u['id']]);
+            log_event((int)$me['id'], null, $me['name'] . ': Bestellerin ' . $u['name'] . ' gelöscht');
+            out(['ok' => true]);
+
         case 'my_pin':
             $me = me();
             $pdo->prepare('UPDATE users SET pin_hash = ? WHERE id = ?')

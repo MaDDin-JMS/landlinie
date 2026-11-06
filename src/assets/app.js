@@ -841,7 +841,15 @@ function admLeute(box) {
     <label class="row" style="margin-top:12px"><input type="checkbox" id="u-admin" ${u?.is_admin ? 'checked' : ''}> Admin</label>
     ${u ? `<label class="row" style="margin-top:8px"><input type="checkbox" id="u-active" ${u.active ? 'checked' : ''}> aktiv</label>` : ''}
     <div class="err" id="u-err"></div>
-    <div class="actions"><button class="btn secondary" data-close>Abbrechen</button><button class="btn" id="u-ok">Speichern</button></div>`, (root, close) => {
+    <div class="actions">${u && u.id !== st.me.id ? '<button class="btn secondary" id="u-del">Löschen</button>' : ''}<button class="btn secondary" data-close>Abbrechen</button><button class="btn" id="u-ok">Speichern</button></div>`, (root, close) => {
+    const del = $('#u-del', root);
+    if (del) del.onclick = async () => {
+      if (!confirm(`${u.name} endgültig löschen?\nGeht nur, solange sie noch nichts bestellt hat – sonst bitte deaktivieren.`)) return;
+      try {
+        await api('user_delete', { id: u.id });
+        close(); toast('Gelöscht'); await load(); render();
+      } catch (e) { $('#u-err', root).textContent = e.message; }
+    };
     $('#u-ok', root).onclick = async () => {
       try {
         await api('user_save', { id: u?.id || 0, name: $('#u-name', root).value, pin: $('#u-pin', root).value, is_admin: $('#u-admin', root).checked ? 1 : 0, active: u ? ($('#u-active', root).checked ? 1 : 0) : 1 });
