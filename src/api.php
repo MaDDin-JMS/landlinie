@@ -173,6 +173,12 @@ try {
             $round = current_round();
             $currentId = $round ? (int)$round['id'] : null;
             $roundId = (int)(arg('round_id') ?: ($round['id'] ?? 0));
+            // Angezeigte Runde inzwischen gelöscht (z. B. vom Admin): zurück zur aktuellen
+            $da = db()->prepare('SELECT 1 FROM rounds WHERE id = ?');
+            $da->execute([$roundId]);
+            if ($roundId && !$da->fetchColumn()) {
+                $roundId = (int)($round['id'] ?? 0);
+            }
             if ($roundId && (!$round || $roundId !== (int)$round['id'])) {
                 $round = auto_close(round_row($roundId));
             }
@@ -345,6 +351,10 @@ try {
         case 'round_delete':
             $me = admin();
             $r = round_row((int)arg('id', 0));
+            // Nur solange nichts beim Shop bestellt ist – danach hängen Rechnung/Pfand daran
+            if (!in_array($r['status'], ['offen', 'geschlossen'], true)) {
+                throw new ApiError('Nur offene oder geschlossene Runden können gelöscht werden.');
+            }
             $pdo->prepare('DELETE FROM rounds WHERE id = ?')->execute([$r['id']]);
             log_event((int)$me['id'], null, $me['name'] . ': Runde "' . $r['title'] . '" gelöscht');
             out(['ok' => true]);

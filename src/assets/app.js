@@ -751,7 +751,8 @@ function admRunde(box) {
       <label class="f">Bestellschluss</label><input id="r-dl" type="datetime-local" value="${esc(r.deadline.slice(0, 16))}">
       <div class="row" style="margin-top:12px"><button class="btn" id="r-save">Speichern</button>
         ${r.status === 'offen' ? '<button class="btn orange" id="r-close">Bestellschluss jetzt</button>' : ''}
-        ${r.status === 'geschlossen' ? '<button class="btn secondary" id="r-reopen">Wieder öffnen</button>' : ''}</div>
+        ${r.status === 'geschlossen' ? '<button class="btn secondary" id="r-reopen">Wieder öffnen</button>' : ''}
+        ${['offen', 'geschlossen'].includes(r.status) ? '<button class="btn danger" id="r-del">Runde löschen</button>' : ''}</div>
       ${r.status !== 'offen' ? `<label class="f">Status weiter setzen</label><div class="row">${statusFlow.slice(1).map((s) =>
         `<button class="btn sm ${r.status === s ? '' : 'secondary'}" data-status="${s}">${s}</button>`).join('')}</div>
         <p class="small muted">"geliefert" trägt das Leergut der Pfand-Artikel bei der jeweiligen Bestellerin ein (wird nicht berechnet).</p>` : ''}
@@ -779,6 +780,12 @@ function admRunde(box) {
       const res = await run(() => api('round_close', { id: r.id }));
       await load(); render();
       modal(`<div class="head"><h2>Bestellschluss</h2><button class="x" data-close>×</button></div>${res.dropped.length ? `<p>Entfallen:</p><ul>${res.dropped.map((d) => `<li>${esc(d)}</li>`).join('')}</ul>` : '<p>Alles ist aufgegangen.</p>'}`);
+    };
+    const rd = $('#r-del', box);
+    if (rd) rd.onclick = async () => {
+      if (!confirm(`Bestellrunde "${r.title}" mit allen Bestellungen darin endgültig löschen?`)) return;
+      await run(() => api('round_delete', { id: r.id }), 'Runde gelöscht');
+      await load(); render();
     };
     const ro = $('#r-reopen', box);
     if (ro) ro.onclick = async () => { await run(() => api('round_reopen', { id: r.id }), 'Wieder offen'); await load(); render(); };
